@@ -1,0 +1,98 @@
+# subr config: ~/.config/subr/config.toml (or $SUBR_CONFIG).
+# Every setting is optional; the values shown are the defaults unless noted.
+
+[repos]
+# Where to look for git repositories. subr does nothing until this is set.
+roots = ["~/src"]                # no default
+max_depth = 3
+active_days = 14                 # a commit this recent makes a repo "active"
+include = []                     # globs over repo paths; only these when set
+exclude = []                     # e.g. ["~/src/work/*"]
+
+[schedule]
+day_starts = "00:00"             # local time the daily budget resets
+windows = []                     # e.g. ["22:00-07:00"]; empty = any time
+tick_secs = 300
+
+# One table per subscription. Percentages are of the provider's weekly window.
+[providers.claude]
+enabled = true
+daily_limit_pct = 14.285714      # 100% / 7 days
+max_weekly_pct = 85              # leave the rest of the week for you
+max_session_pct = 60             # don't start while the 5-hour window is busy
+min_job_pct = 2                  # headroom a job needs to start
+stop_margin_pct = 1              # stop a job this close to the daily limit
+min_fetch_secs = 60              # least time between usage requests
+# model = "claude-sonnet-5"
+# permission = "acceptEdits"     # Claude permission mode (the default)
+# launcher = { prefix = ["nice", "-n", "10"] }
+# Approvals answered without asking, on top of the built-in ones (reading,
+# builds and tests; git push and gh are always denied). Everything else is
+# rejected, since nobody is there to ask.
+# default_policy = true
+# policy = [
+#   { decision = "allow", tool = "shell", command = "cargo test" },
+#   { decision = "deny", tool = "shell", command = "git push" },
+# ]
+
+[providers.codex]
+enabled = true
+daily_limit_pct = 14.285714
+# permission = ":workspace"      # Codex permission profile (the default)
+
+[jobs]
+timeout_mins = 45
+max_attempts = 2                 # tries per task
+retry_after_hours = 24
+stale_kill_after_secs = 300      # stop a job when quota can't be read this long
+watch_secs = 60
+
+[publish]
+push = true                      # push the branch and open a draft PR
+remote = "origin"
+branch_prefix = "subr/"
+label = "subr"
+max_open_prs = 2                 # per repo
+
+# Task sources, tried in order. The default is just the native queue.
+[[sources]]
+type = "native"                  # `subr add "..." --repo <path>`
+
+# [[sources]]
+# type = "markdown"
+# file = "TODO.md"               # `- [ ]` items in each repo
+
+# [[sources]]
+# type = "github"
+# label = "subr"                 # open issues with this label, via `gh`
+
+# [[sources]]
+# type = "lapp"                  # Lapp notes app, via its MCP server
+# command = ["lapp-headless", "mcp"]
+
+# [[sources]]
+# type = "command"               # any tracker: `<cmd> list|complete|fail`
+# name = "linear"
+# command = ["~/bin/linear-subr"]
+
+[tasks]
+exclude = []                     # skip tasks whose title contains these, e.g. ["on the Mac"]
+
+# Presets run when no task is queued. Built in: review-recent, tests,
+# lint-fix, docs-sync (open PRs) and deps-audit (a report).
+# [presets.docs-sync]
+# enabled = false
+# [presets.tests]
+# cooldown_days = 3
+# [presets.changelog]
+# prompt = "Bring CHANGELOG.md up to date with the commits since the last release."
+# mode = "pr"                    # or "report"
+# cooldown_days = 7
+
+# Per-repo overrides, by remote or path.
+# [repo."github.com/you/project"]
+# skip = false
+# presets = ["tests", "lint-fix"]
+# push = false
+# verify = "cargo test"
+# provider = "codex"

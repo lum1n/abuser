@@ -24,7 +24,7 @@ codex (plus)
    - at least `min_job_pct` of today's budget is left;
    - the time is inside `schedule.windows`, if you set any.
 3. **Pick work.** subr takes queued tasks first, starting with the repo you committed to most recently. When the queue is empty, it takes presets that are due, round-robin over the repos you've been active in.
-4. **Run it.** The agent runs in its own git worktree. It is started through [acc](https://github.com/lum1n/acc), which drives Claude Code and Codex headlessly. Your checkout is never touched.
+4. **Run it.** The agent runs in its own git worktree. It is started through [acc](https://github.com/lum1n/acc), which drives Claude Code and Codex headlessly. subr removes API keys (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `OPENAI_API_KEY`, `CODEX_API_KEY`) from the harness's environment, so it always runs on the subscription login and never bills an API account. Your checkout is never touched.
 5. **Publish.**
    1. subr commits the work.
    2. It runs your `verify` command, if you set one.

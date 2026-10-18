@@ -165,7 +165,7 @@ pub async fn run(ctx: &Ctx, work: Work, provider: ProviderId) -> Result<JobRow> 
             .permission
             .clone()
             .or_else(|| default_permission(provider)),
-        launcher: pcfg.launcher.clone(),
+        launcher: Some(subscription_launcher(provider, pcfg.launcher.as_ref())),
         policy: crate::policy::rules(&pcfg.policy, pcfg.default_policy),
         labels: vec![
             ("subr_job".to_owned(), name.clone()),
@@ -269,6 +269,34 @@ fn default_permission(p: ProviderId) -> Option<String> {
         }
         .to_owned(),
     )
+}
+
+/// Environment variables that make a harness bill an API account instead of
+/// the subscription. Headless Claude Code prefers `ANTHROPIC_API_KEY` over
+/// its login without asking, so a key left in the environment fails a job
+/// with "Credit balance is too low" while the subscription has quota.
+fn api_key_vars(p: ProviderId) -> &'static [&'static str] {
+    match p {
+        ProviderId::Claude => &["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"],
+        ProviderId::Codex => &["OPENAI_API_KEY", "CODEX_API_KEY"],
+    }
+}
+
+/// The configured launcher, run under `env -u ...` so the harness never
+/// sees an API key and uses the subscription login.
+fn subscription_launcher(
+    p: ProviderId,
+    configured: Option<&acc_core::harness::Launcher>,
+) -> acc_core::harness::Launcher {
+    let mut launcher = configured.cloned().unwrap_or_default();
+    let mut prefix = vec!["env".to_owned()];
+    for var in api_key_vars(p) {
+        prefix.push("-u".to_owned());
+        prefix.push((*var).to_owned());
+    }
+    prefix.append(&mut launcher.prefix);
+    launcher.prefix = prefix;
+    launcher
 }
 
 fn job_name(now: DateTime<Utc>, slug: &str) -> String {
@@ -658,5 +686,32 @@ mod tests {
         let n = job_name(Utc::now(), &"x".repeat(80));
         assert!(harness::valid_name(&n), "{n}");
         assert!(n.len() <= 64);
+    }
+
+    #[test]
+    fn launcher_drops_api_keys_before_the_configured_prefix() {
+        let configured = acc_core::harness::Launcher {
+            prefix: vec!["nice".to_owned(), "-n".to_owned(), "10".to_owned()],
+            ..Default::default()
+        };
+        let l = subscription_launcher(ProviderId::Claude, Some(&configured));
+        assert_eq!(
+            l.prefix,
+            [
+                "env",
+                "-u",
+                "ANTHROPIC_API_KEY",
+                "-u",
+                "ANTHROPIC_AUTH_TOKEN",
+                "nice",
+                "-n",
+                "10"
+            ]
+        );
+        let l = subscription_launcher(ProviderId::Codex, None);
+        assert_eq!(
+            l.prefix,
+            ["env", "-u", "OPENAI_API_KEY", "-u", "CODEX_API_KEY"]
+        );
     }
 }

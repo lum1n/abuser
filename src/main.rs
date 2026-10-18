@@ -83,9 +83,7 @@ enum Cmd {
     /// Start jobs again.
     Resume,
     /// Stop a running job; its worktree is discarded.
-    Stop {
-        job: String,
-    },
+    Stop { job: String },
     /// Install subr as a user service (systemd on Linux, launchd on macOS).
     InstallService {
         /// Print the service file instead of installing it.

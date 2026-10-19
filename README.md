@@ -152,7 +152,7 @@ cargo test            # unit tests, plus end-to-end runs against a fake harness
 cargo clippy --all-targets
 ```
 
-The end-to-end tests run the real binary in a temporary `$HOME`, with a fake Claude Code, a mock usage endpoint and a bare git remote. One checks that a queued task becomes a pushed branch. The other checks that a job is stopped at the daily limit while usage climbs.
+The end-to-end tests run the real binary in a temporary `$HOME`, with a fake Claude Code, a mock usage endpoint and a bare git remote. One checks that a queued task becomes a pushed branch. Another checks that a job is stopped at the daily limit while usage climbs. A third kills the daemon with `SIGKILL` mid-job, starts it again, and checks that the job is picked up, finished and charged for the usage while subr was down.
 
 ## License
 

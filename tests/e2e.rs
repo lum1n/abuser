@@ -279,3 +279,141 @@ async fn job_is_stopped_at_the_daily_limit() {
         "{again}"
     );
 }
+
+/// Like `FAKE_CLAUDE`, but after reporting in it marks `MARKS/started` and
+/// holds the turn open until `MARKS/go` exists.
+const WAITING_CLAUDE: &str = r##"#!/bin/sh
+while IFS= read -r line; do
+  case "$line" in
+    *'"type":"user"'*)
+      printf '%s\n' '{"type":"system","subtype":"init","session_id":"fake-3","cwd":"/","model":"fake","tools":[],"permissionMode":"acceptEdits"}'
+      touch MARKS/started
+      while [ ! -e MARKS/go ]; do sleep 0.2; done
+      echo hello > hello.txt
+      git add hello.txt && git -c user.name=t -c user.email=t@t commit -qm "Add hello.txt"
+      printf '%s\n' '{"type":"assistant","message":{"id":"msg_1","type":"message","role":"assistant","model":"fake","content":[{"type":"text","text":"Added it.\n\n```subr-result\n{\"status\":\"done\",\"summary\":\"Added hello.txt\",\"pr_title\":\"Add hello.txt\"}\n```"}]},"session_id":"fake-3"}'
+      printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"Added it.","session_id":"fake-3","num_turns":1,"total_cost_usd":0,"usage":{"input_tokens":10,"output_tokens":5}}'
+      ;;
+  esac
+done
+"##;
+
+/// Weekly usage the test sets as it goes.
+#[derive(Clone)]
+struct Level(std::sync::Arc<std::sync::atomic::AtomicU64>);
+
+impl Level {
+    fn new(weekly: f64) -> Self {
+        Self(std::sync::Arc::new(weekly.to_bits().into()))
+    }
+
+    fn set(&self, weekly: f64) {
+        self.0
+            .store(weekly.to_bits(), std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+impl wiremock::Respond for Level {
+    fn respond(&self, _: &wiremock::Request) -> ResponseTemplate {
+        let weekly = f64::from_bits(self.0.load(std::sync::atomic::Ordering::SeqCst));
+        ResponseTemplate::new(200).set_body_json(usage(weekly))
+    }
+}
+
+/// Polls `check` every half second until it holds; fails after `secs`.
+async fn wait_for(secs: u64, what: &str, mut check: impl FnMut() -> bool) {
+    let until = std::time::Instant::now() + Duration::from_secs(secs);
+    while !check() {
+        assert!(
+            std::time::Instant::now() < until,
+            "timed out waiting for {what}"
+        );
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
+impl Env {
+    /// Starts `subr run` in the background, logging to `log` in the root.
+    fn daemon(&self, log: &str) -> std::process::Child {
+        let log = std::fs::File::create(self.root.join(log)).unwrap();
+        Command::new(env!("CARGO_BIN_EXE_subr"))
+            .arg("run")
+            .env("HOME", self.root.join("home"))
+            .env("SUBR_CONFIG", self.root.join("config.toml"))
+            .env("SUBR_STATE_DIR", self.root.join("state"))
+            .env("RUST_LOG", "subr=info")
+            .env_remove("XDG_CONFIG_HOME")
+            .env_remove("XDG_STATE_HOME")
+            .env_remove("CLAUDE_CONFIG_DIR")
+            .env_remove("CLAUDE_CODE_OAUTH_TOKEN")
+            .stdout(std::process::Stdio::null())
+            .stderr(log)
+            .spawn()
+            .unwrap()
+    }
+
+    fn log(&self, name: &str) -> String {
+        std::fs::read_to_string(self.root.join(name)).unwrap_or_default()
+    }
+
+    fn job_running(&self) -> bool {
+        let out = self.subr(&["status", "--json"]);
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap_or_default();
+        v["running"].as_array().is_some_and(|r| !r.is_empty())
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn job_is_reattached_after_a_crash() {
+    let server = MockServer::start().await;
+    let level = Level::new(20.0);
+    Mock::given(method("GET"))
+        .respond_with(level.clone())
+        .mount(&server)
+        .await;
+    let marks_dir = tempfile::tempdir().unwrap();
+    let marks = marks_dir.path().canonicalize().unwrap();
+    let fake = WAITING_CLAUDE.replace("MARKS", &marks.display().to_string());
+    let env = setup(&fake, &server.uri(), "");
+    let repo = env.root.join("repos/proj");
+    env.ok(&["add", "Add a hello file", "--repo", repo.to_str().unwrap()]);
+
+    // The job starts at 20% and the agent gets to work; then subr is
+    // killed without a chance to stop it.
+    let mut first = env.daemon("first.log");
+    wait_for(120, "the job to start", || {
+        marks.join("started").exists() && env.job_running()
+    })
+    .await;
+    first.kill().unwrap();
+    first.wait().unwrap();
+    assert!(env.job_running(), "{}", env.log("first.log"));
+
+    // While nobody watches, the agent finishes and usage climbs 3 points.
+    level.set(23.0);
+    std::fs::write(marks.join("go"), "").unwrap();
+
+    // Paused, so the restarted daemon only picks the job up.
+    env.ok(&["pause"]);
+    let mut second = env.daemon("second.log");
+    wait_for(120, "the job to finish", || !env.job_running()).await;
+    sh(&env.root, &format!("kill -TERM {}", second.id()));
+    second.wait().unwrap();
+    let log = env.log("second.log");
+    assert!(log.contains("reattached"), "{log}");
+
+    // The work was published, and the rise while subr was down is charged.
+    let jobs = env.ok(&["jobs"]);
+    assert!(
+        jobs.contains("done") && jobs.contains("3.0%"),
+        "{jobs}\n{log}"
+    );
+    let branches = sh(&env.root.join("remote.git"), "git branch --list 'subr/*'");
+    let branch = branches.trim().trim_start_matches("* ").to_owned();
+    assert!(branch.starts_with("subr/"), "remote branches: {branches:?}");
+    let files = sh(
+        &env.root.join("remote.git"),
+        &format!("git ls-tree --name-only {branch}"),
+    );
+    assert!(files.contains("hello.txt"), "{files}");
+}

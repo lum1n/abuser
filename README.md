@@ -48,13 +48,20 @@ subr fails closed: with no reading, nothing starts. When the daemon stops, it st
 
 ## Install
 
-You need Rust 1.88 or later, git, and the CLIs you want subr to use, signed in:
+You need git and the CLIs you want subr to use, signed in:
 - `claude` (Claude Code)
 - `codex`
 - `gh` (for pull requests and issues)
 
+Prebuilt binaries for Linux and macOS (x86_64 and arm64) are attached to each [release](https://github.com/lum1n/subr/releases). The installer puts `subr` in `~/.cargo/bin`:
+
 ```sh
-cargo install --git https://github.com/lum1n/subr
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/lum1n/subr/releases/latest/download/subr-installer.sh | sh
+```
+
+Or build it with Rust 1.88 or later: `cargo install --git https://github.com/lum1n/subr`. Then:
+
+```sh
 subr config example > ~/.config/subr/config.toml   # then set repos.roots
 subr config check
 subr once --dry-run          # what would run now, and why
@@ -153,6 +160,10 @@ cargo clippy --all-targets
 ```
 
 The end-to-end tests run the real binary in a temporary `$HOME`, with a fake Claude Code, a mock usage endpoint and a bare git remote. One checks that a queued task becomes a pushed branch. The other checks that a job is stopped at the daily limit while usage climbs.
+
+### Releasing
+
+Releases are built by [dist](https://github.com/axodotdev/cargo-dist) (`dist-workspace.toml`, `.github/workflows/release.yml`). Bump `version` in `Cargo.toml`, then push a matching tag such as `v0.2.0`. The workflow builds the four Linux and macOS targets and publishes a GitHub Release with the archives, checksums and `subr-installer.sh`. Run `dist plan` to see what a release would contain.
 
 ## License
 

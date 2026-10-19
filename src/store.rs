@@ -288,10 +288,23 @@ impl Store {
 
     // ---- task attempts -------------------------------------------------------
 
-    pub fn record_attempt(&self, key: &str, status: JobStatus, pr_url: Option<&str>) -> Result<()> {
+    /// Counts an attempt as it starts, so one that never finishes (subr was
+    /// killed, the agent couldn't start) still counts and waits its turn.
+    pub fn start_attempt(&self, key: &str) -> Result<()> {
+        self.db().execute(
+            "INSERT INTO attempts (task_key, count, last_at, last_status) VALUES (?1, 1, ?2, 'running')
+             ON CONFLICT(task_key) DO UPDATE SET count = count + 1, last_at = excluded.last_at,
+               last_status = excluded.last_status",
+            params![key, ts(Utc::now())],
+        )?;
+        Ok(())
+    }
+
+    /// Records how the latest attempt ended (one attempt, when none was started).
+    pub fn end_attempt(&self, key: &str, status: JobStatus, pr_url: Option<&str>) -> Result<()> {
         self.db().execute(
             "INSERT INTO attempts (task_key, count, last_at, last_status, pr_url) VALUES (?1, 1, ?2, ?3, ?4)
-             ON CONFLICT(task_key) DO UPDATE SET count = count + 1, last_at = excluded.last_at,
+             ON CONFLICT(task_key) DO UPDATE SET last_at = excluded.last_at,
                last_status = excluded.last_status, pr_url = COALESCE(excluded.pr_url, pr_url)",
             params![key, ts(Utc::now()), status.as_str(), pr_url],
         )?;
@@ -433,12 +446,22 @@ mod tests {
     #[test]
     fn attempts_count_up() {
         let s = Store::in_memory().unwrap();
-        s.record_attempt("k", JobStatus::Failed, None).unwrap();
-        s.record_attempt("k", JobStatus::Done, Some("https://pr"))
+        s.start_attempt("k").unwrap();
+        s.end_attempt("k", JobStatus::Failed, None).unwrap();
+        s.start_attempt("k").unwrap();
+        assert_eq!(
+            s.attempts("k").unwrap().unwrap().last_status,
+            JobStatus::Running
+        );
+        s.end_attempt("k", JobStatus::Done, Some("https://pr"))
             .unwrap();
         let a = s.attempts("k").unwrap().unwrap();
         assert_eq!(a.count, 2);
         assert_eq!(a.last_status, JobStatus::Done);
         assert_eq!(a.pr_url.as_deref(), Some("https://pr"));
+
+        // A job from before attempts were counted at the start still counts once.
+        s.end_attempt("old", JobStatus::Failed, None).unwrap();
+        assert_eq!(s.attempts("old").unwrap().unwrap().count, 1);
     }
 }

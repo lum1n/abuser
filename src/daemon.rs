@@ -1,5 +1,6 @@
 //! The background loop: read quota, pick work, run it, repeat.
 
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -7,9 +8,11 @@ use chrono::Utc;
 use serde::Serialize;
 
 use crate::budget::{self, Verdict};
+use crate::config::Config;
 use crate::quota::{ProviderId, Snapshot};
 use crate::runner::{self, Ctx};
 use crate::select::{self, Plan, Work};
+use crate::store::Store;
 
 pub const PAUSE_FLAG: &str = "paused";
 
@@ -144,29 +147,54 @@ pub async fn tick(ctx: &Ctx, dry_run: bool) -> Result<Tick> {
 
 /// Runs until SIGTERM or Ctrl-C. A running job's agent is stopped then, so
 /// nothing spends quota while subr isn't watching; its worktree is kept.
-/// (After a crash, the next start reattaches to it instead.)
-pub async fn run(ctx: Ctx) -> Result<()> {
+/// (After a crash, the next start reattaches to it instead.) The config
+/// file is read again between ticks when it changes.
+pub async fn run(mut ctx: Ctx, config: Option<PathBuf>) -> Result<()> {
     tracing::info!("subr {} running", env!("CARGO_PKG_VERSION"));
-    if ctx.cfg.repos.roots.is_empty() {
-        tracing::warn!("repos.roots is empty: no repos to work in (see `subr config example`)");
-    }
+    let path = config.unwrap_or_else(crate::paths::config_file);
+    warn_unconfigured(&ctx);
+    let mut cfg_mtime = mtime(&path);
+    let stopping = ctx.store.clone();
     let work = async {
         if let Err(e) = runner::resume_all(&ctx).await {
             tracing::error!("resuming jobs: {e:#}");
         }
+        // The last thing said about an idle tick, so it isn't repeated each time.
+        let mut said = String::new();
         loop {
-            match tick(&ctx, false).await {
+            let now = mtime(&path);
+            if now != cfg_mtime {
+                cfg_mtime = now;
+                match Config::load(Some(&path)) {
+                    Ok((cfg, _)) => {
+                        ctx = Ctx::new(cfg, ctx.cfg_dir.clone(), ctx.store.clone());
+                        tracing::info!("reloaded {}", path.display());
+                        warn_unconfigured(&ctx);
+                        said.clear();
+                    }
+                    Err(e) => tracing::error!("keeping the old config: {e:#}"),
+                }
+            }
+            let idle = match tick(&ctx, false).await {
                 Ok(Tick::Ran(job)) => {
                     tracing::info!(job = %job.id, "{}: {}", job.status.as_str(), job.detail.unwrap_or_default());
+                    said.clear();
                     // Look again soon: there may be budget for more.
                     tokio::time::sleep(Duration::from_secs(30)).await;
                     continue;
                 }
-                Ok(Tick::NoBudget(why)) => tracing::debug!("not starting: {}", why.join("; ")),
-                Ok(Tick::NothingToDo) => tracing::debug!("nothing to do"),
-                Ok(Tick::Paused) => tracing::debug!("paused"),
-                Ok(Tick::Would(..)) => {}
-                Err(e) => tracing::error!("{e:#}"),
+                Ok(Tick::NoBudget(why)) => format!("not starting: {}", why.join("; ")),
+                Ok(Tick::NothingToDo) => "nothing to do".to_owned(),
+                Ok(Tick::Paused) => "paused".to_owned(),
+                Ok(Tick::Would(..)) => String::new(),
+                Err(e) => {
+                    tracing::error!("{e:#}");
+                    String::new()
+                }
+            };
+            if idle != said {
+                tracing::info!("{idle}");
+                said = idle;
             }
             tokio::time::sleep(Duration::from_secs(ctx.cfg.schedule.tick_secs.max(30))).await;
         }
@@ -177,21 +205,36 @@ pub async fn run(ctx: Ctx) -> Result<()> {
         _ = tokio::signal::ctrl_c() => tracing::info!("interrupted"),
         _ = term.recv() => tracing::info!("terminated"),
     }
-    stop_running(&ctx).await
+    stop_running(&stopping, |_| true).await
 }
 
-async fn stop_running(ctx: &Ctx) -> Result<()> {
-    for job in ctx.store.running_jobs()? {
+fn warn_unconfigured(ctx: &Ctx) {
+    if ctx.cfg.repos.roots.is_empty() {
+        tracing::warn!("repos.roots is empty: no repos to work in (see `subr config example`)");
+    }
+}
+
+fn mtime(path: &Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(path).and_then(|m| m.modified()).ok()
+}
+
+/// Stops the running jobs `which` picks; their worktrees are kept.
+pub async fn stop_running(store: &Store, which: impl Fn(&str) -> bool) -> Result<()> {
+    for job in store.running_jobs()? {
+        if !which(&job.id) {
+            continue;
+        }
         tracing::info!(job = %job.id, "stopping the agent; worktree kept");
         if let Err(e) = crate::harness::kill_session(&job.id).await {
             tracing::warn!(job = %job.id, "{e:#}");
         }
-        ctx.store.finish_job(
+        store.finish_job(
             &job.id,
             crate::store::JobStatus::Failed,
             None,
             Some("subr was stopped while it ran; the worktree is kept"),
         )?;
+        store.end_attempt(&job.task_key, crate::store::JobStatus::Failed, None)?;
     }
     Ok(())
 }

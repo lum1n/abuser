@@ -262,11 +262,19 @@ mod tests {
 
         // A task that failed recently waits; one that's done is skipped.
         let key = p.work[0].key();
-        store.record_attempt(&key, JobStatus::Failed, None).unwrap();
+        store.start_attempt(&key).unwrap();
+        store.end_attempt(&key, JobStatus::Failed, None).unwrap();
         let p = plan(&cfg, &store, &sources, &repos, &presets, Utc::now())
             .await
             .unwrap();
         assert_eq!(p.work.len(), 1);
+
+        // So does one that started and never finished (subr was killed).
+        store.start_attempt(&p.work[0].key()).unwrap();
+        let p = plan(&cfg, &store, &sources, &repos, &presets, Utc::now())
+            .await
+            .unwrap();
+        assert!(p.work.is_empty());
     }
 
     #[test]

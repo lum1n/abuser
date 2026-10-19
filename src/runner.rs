@@ -154,6 +154,7 @@ pub async fn run(ctx: &Ctx, work: Work, provider: ProviderId) -> Result<JobRow> 
         .await;
 
     tracing::info!(job = %name, %provider, repo = %work.repo.key(), "starting: {}", work.title());
+    ctx.store.start_attempt(&work.key())?;
     let agent = Agent::launch(harness::Spec {
         harness: provider.harness(),
         repo: work.repo.path.clone(),
@@ -218,6 +219,8 @@ pub async fn resume_all(ctx: &Ctx) -> Result<()> {
         else {
             ctx.store
                 .finish_job(&row.id, JobStatus::Failed, None, Some("lost its state"))?;
+            ctx.store
+                .end_attempt(&row.task_key, JobStatus::Failed, None)?;
             continue;
         };
         let pcfg = ctx.provider_cfg(state.provider);
@@ -243,6 +246,8 @@ pub async fn resume_all(ctx: &Ctx) -> Result<()> {
                     None,
                     Some(&format!("can't reattach: {e:#}")),
                 )?;
+                ctx.store
+                    .end_attempt(&row.task_key, JobStatus::Failed, None)?;
             }
         }
     }
@@ -476,7 +481,7 @@ async fn finish(ctx: &Ctx, agent: &Agent, state: &JobState, end: End) -> Result<
     let pr_url = published.as_ref().and_then(|p| p.url().map(str::to_owned));
     let detail = detail.unwrap_or_else(|| summary.lines().next().unwrap_or("").to_owned());
     ctx.store
-        .record_attempt(&work.key(), status, pr_url.as_deref())?;
+        .end_attempt(&work.key(), status, pr_url.as_deref())?;
     if let What::Preset(p) = &work.what
         && status != JobStatus::BudgetStopped
     {

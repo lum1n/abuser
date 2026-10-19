@@ -150,7 +150,7 @@ async fn run(cli: Cli) -> Result<()> {
     }
     let ctx = open(&cli)?;
     match cli.cmd {
-        Cmd::Run => daemon::run(ctx).await,
+        Cmd::Run => daemon::run(ctx, cli.config.clone()).await,
         Cmd::Status { json } => status(&ctx, json).await,
         Cmd::Tasks { json } => tasks(&ctx, json).await,
         Cmd::Once { dry_run } => once(&ctx, dry_run).await,
@@ -331,7 +331,22 @@ async fn tasks(ctx: &Ctx, json: bool) -> Result<()> {
 }
 
 async fn once(ctx: &Ctx, dry_run: bool) -> Result<()> {
-    match daemon::tick(ctx, dry_run).await? {
+    // On Ctrl-C, stop the job this run started (not the service's), and
+    // count it as a failed attempt so the next run doesn't pick it again.
+    let before: Vec<String> = ctx
+        .store
+        .running_jobs()?
+        .into_iter()
+        .map(|j| j.id)
+        .collect();
+    let tick = tokio::select! {
+        t = daemon::tick(ctx, dry_run) => t?,
+        _ = tokio::signal::ctrl_c() => {
+            println!("interrupted; stopping the job");
+            return daemon::stop_running(&ctx.store, |id| !before.iter().any(|b| b == id)).await;
+        }
+    };
+    match tick {
         Tick::Paused => println!("paused"),
         Tick::NoBudget(why) => {
             println!("not starting:");

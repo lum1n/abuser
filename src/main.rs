@@ -19,10 +19,11 @@ mod select;
 mod service;
 mod store;
 mod tasks;
+mod tui;
 
 use std::path::PathBuf;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use chrono::{Local, Utc};
 use clap::{Parser, Subcommand};
 
@@ -49,6 +50,8 @@ struct Cli {
 enum Cmd {
     /// Run in the foreground: watch quota and work when there is budget.
     Run,
+    /// Watch and steer subr in a terminal UI.
+    Tui,
     /// Quota, today's spend and the latest jobs.
     Status {
         #[arg(long)]
@@ -219,35 +222,25 @@ async fn run(cli: Cli) -> Result<()> {
             println!("removed {key} from {}", path.display());
             return Ok(());
         }
-        Cmd::Config(ConfigCmd::Edit) => return edit_config(cli.config.as_deref()),
+        Cmd::Config(ConfigCmd::Edit) => {
+            let path = cli.config.clone().unwrap_or_else(paths::config_file);
+            println!("{}", control::edit_config(&path)?);
+            return Ok(());
+        }
         _ => {}
     }
     let ctx = open(&cli)?;
     match cli.cmd {
         Cmd::Run => daemon::run(ctx, cli.config.clone()).await,
+        Cmd::Tui => {
+            let path = cli.config.clone().unwrap_or_else(paths::config_file);
+            tui::run(ctx, path).await
+        }
         Cmd::Status { json } => status(&ctx, json).await,
         Cmd::Tasks { json } => tasks(&ctx, json).await,
         Cmd::Once { dry_run } => once(&ctx, dry_run).await,
         Cmd::Add { title, repo, body } => {
-            let repo = match repos::normalize_remote(&repo) {
-                Some(r) => r,
-                None => std::fs::canonicalize(paths::expand_home(repo.as_ref()))
-                    .with_context(|| format!("no such repo {repo:?}"))?
-                    .display()
-                    .to_string(),
-            };
-            let id = ctx.store.add_native(&repo, &title, &body)?;
-            if !ctx
-                .cfg
-                .sources
-                .iter()
-                .any(|s| matches!(s, config::SourceCfg::Native {}))
-            {
-                eprintln!(
-                    "note: the native source isn't in `sources`, so this task won't be picked up"
-                );
-            }
-            println!("queued #{id} for {repo}");
+            println!("{}", control::add(&ctx, &title, &repo, &body)?);
             Ok(())
         }
         Cmd::Jobs { limit } => {
@@ -266,22 +259,17 @@ async fn run(cli: Cli) -> Result<()> {
         Cmd::Retry { task } => control::retry(&ctx, &task).await,
         Cmd::RunNow { what, repo } => control::run_now(&ctx, &what, repo.as_deref()).await,
         Cmd::Pause => {
-            ctx.store
-                .set_flag(PAUSE_FLAG, Some(&Utc::now().to_rfc3339()))?;
+            control::set_paused(&ctx, true)?;
             println!("paused");
             Ok(())
         }
         Cmd::Resume => {
-            ctx.store.set_flag(PAUSE_FLAG, None)?;
+            control::set_paused(&ctx, false)?;
             println!("resumed");
             Ok(())
         }
         Cmd::Stop { job } => {
-            if !ctx.store.running_jobs()?.iter().any(|j| j.id == job) {
-                bail!("no running job {job}");
-            }
-            ctx.store.set_flag(&format!("stop:{job}"), Some("1"))?;
-            println!("stopping {job} (the daemon acts on it within seconds)");
+            println!("{}", control::stop(&ctx, &job)?);
             Ok(())
         }
         Cmd::Config(ConfigCmd::Check) => check(&ctx).await,
@@ -540,33 +528,6 @@ async fn check(ctx: &Ctx) -> Result<()> {
     if !ok {
         bail!("some checks failed");
     }
-    Ok(())
-}
-
-fn edit_config(path: Option<&std::path::Path>) -> Result<()> {
-    let path = path.map_or_else(paths::config_file, std::path::Path::to_path_buf);
-    if !path.exists() {
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        std::fs::write(&path, config::EXAMPLE)?;
-    }
-    let editor = std::env::var("VISUAL")
-        .or_else(|_| std::env::var("EDITOR"))
-        .unwrap_or_else(|_| "vi".to_owned());
-    // The editor may carry flags (`code --wait`).
-    let status = std::process::Command::new("sh")
-        .arg("-c")
-        .arg(format!("{editor} \"$1\""))
-        .arg("sh")
-        .arg(&path)
-        .status()
-        .with_context(|| format!("starting {editor}"))?;
-    if !status.success() {
-        bail!("{editor} failed");
-    }
-    Config::load(Some(&path)).context("the config has a problem; subr keeps the old one")?;
-    println!("{} is valid", path.display());
     Ok(())
 }
 

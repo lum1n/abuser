@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::ReposCfg;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Repo {
     pub path: PathBuf,
     /// `origin` as configured (`git@github.com:o/r.git`).

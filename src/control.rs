@@ -126,7 +126,9 @@ pub async fn job(ctx: &Ctx, query: Option<&str>, diff: bool, json: bool) -> Resu
     Ok(())
 }
 
-async fn job_diff(j: &JobRow, files: &JobFiles) -> Result<()> {
+/// The git commands that show a job's changes: what isn't committed yet
+/// (new files don't show in the diff), then everything since it started.
+async fn diff_commands(j: &JobRow, files: &JobFiles) -> Result<Vec<tokio::process::Command>> {
     let Some(worktree) = &files.worktree else {
         match &j.pr_url {
             Some(pr) => bail!("the worktree is gone; the changes are in {pr}"),
@@ -136,21 +138,45 @@ async fn job_diff(j: &JobRow, files: &JobFiles) -> Result<()> {
     let base = crate::runner::read_base_commit(&j.id)
         .await
         .unwrap_or_else(|| "HEAD".to_owned());
-    // What isn't committed yet (new files don't show in the diff), then
-    // everything since the job started.
-    for args in [&["status", "--short"][..], &["diff", &base]] {
-        let status = tokio::process::Command::new("git")
-            .arg("-C")
-            .arg(worktree)
-            .args(args)
-            .status()
-            .await
-            .context("running git")?;
-        if !status.success() {
-            bail!("git {} failed", args[0]);
+    Ok([vec!["status", "--short"], vec!["diff", &base]]
+        .into_iter()
+        .map(|args| {
+            let mut c = tokio::process::Command::new("git");
+            c.arg("-C").arg(worktree).args(args);
+            c
+        })
+        .collect())
+}
+
+async fn job_diff(j: &JobRow, files: &JobFiles) -> Result<()> {
+    for mut c in diff_commands(j, files).await? {
+        if !c.status().await.context("running git")?.success() {
+            bail!("git failed");
         }
     }
     Ok(())
+}
+
+/// A job's changes as text, as `subr job --diff` shows them.
+pub async fn diff_text(j: &JobRow) -> Result<String> {
+    let mut text = String::new();
+    for mut c in diff_commands(j, &job_files(&j.id)).await? {
+        let out = c.output().await.context("running git")?;
+        if !out.status.success() {
+            bail!("git: {}", String::from_utf8_lossy(&out.stderr).trim());
+        }
+        text.push_str(&String::from_utf8_lossy(&out.stdout));
+    }
+    Ok(text)
+}
+
+/// A log line as people read it: the agent's `subr-result` block is for
+/// subr, and its summary shows elsewhere.
+pub fn readable(mut l: LogLine) -> Option<LogLine> {
+    if l.kind == "agent" {
+        l.text = crate::prompt::strip_result(&l.text).trim().to_owned();
+    }
+    (!l.text.is_empty()).then_some(l)
 }
 
 pub fn print_log_line(l: &LogLine) {
@@ -179,7 +205,7 @@ pub async fn logs(ctx: &Ctx, query: Option<&str>, follow: bool) -> Result<()> {
             }
             bail!("no log for {}", j.id);
         };
-        for l in reader.read(&log).await? {
+        for l in reader.read(&log).await?.into_iter().filter_map(readable) {
             print_log_line(&l);
         }
         if !follow || !running {
@@ -204,10 +230,15 @@ pub fn queue(ctx: &Ctx) -> Result<()> {
 }
 
 pub fn unqueue(ctx: &Ctx, id: i64) -> Result<()> {
+    remove(ctx, id)?;
+    println!("removed #{id}");
+    Ok(())
+}
+
+pub fn remove(ctx: &Ctx, id: i64) -> Result<()> {
     if !ctx.store.remove_native(id)? {
         bail!("no queued task #{id}");
     }
-    println!("removed #{id}");
     Ok(())
 }
 
@@ -272,24 +303,33 @@ async fn candidates(ctx: &Ctx, skipped: bool) -> Result<(Vec<Candidate>, usize)>
 pub async fn skip(ctx: &Ctx, query: &str) -> Result<()> {
     let (cands, numbered) = candidates(ctx, false).await?;
     let c = pick(cands, numbered, query)?;
-    if ctx.store.flag(NEXT_FLAG)?.as_deref() == Some(c.key.as_str()) {
+    let Some(work) = &c.work else {
+        bail!("{} is skipped already", c.title);
+    };
+    println!("{}", skip_work(ctx, work)?);
+    Ok(())
+}
+
+/// Leaves a task out until it is retried, or puts a preset off for a cooldown.
+pub fn skip_work(ctx: &Ctx, work: &Work) -> Result<String> {
+    let key = work.key();
+    if ctx.store.flag(NEXT_FLAG)?.as_deref() == Some(key.as_str()) {
         ctx.store.set_flag(NEXT_FLAG, None)?;
     }
-    match c.work.as_ref().map(|w| &w.what) {
-        Some(What::Preset(p)) => {
-            let repo = c.work.as_ref().map(|w| w.repo.key()).unwrap_or_default();
-            ctx.store.preset_ran(&repo, &p.name)?;
-            println!(
+    Ok(match &work.what {
+        What::Preset(p) => {
+            ctx.store.preset_ran(&work.repo.key(), &p.name)?;
+            format!(
                 "skipped {}; it is due again in {} days",
-                c.title, p.cooldown_days
-            );
+                work.title(),
+                p.cooldown_days
+            )
         }
-        _ => {
-            ctx.store.end_attempt(&c.key, JobStatus::Skipped, None)?;
-            println!("skipped {} (subr retry to undo)", c.title);
+        What::Task(_) => {
+            ctx.store.end_attempt(&key, JobStatus::Skipped, None)?;
+            format!("skipped {} (retry to undo)", work.title())
         }
-    }
-    Ok(())
+    })
 }
 
 pub async fn retry(ctx: &Ctx, query: &str) -> Result<()> {
@@ -299,6 +339,77 @@ pub async fn retry(ctx: &Ctx, query: &str) -> Result<()> {
     ctx.store.clear_attempts(&c.key)?;
     println!("{} will be picked again", c.title);
     Ok(())
+}
+
+/// Queues a task for `repo`: a remote, or a path to a checkout.
+pub fn add(ctx: &Ctx, title: &str, repo: &str, body: &str) -> Result<String> {
+    if title.trim().is_empty() {
+        bail!("the task needs a title");
+    }
+    let repo = match crate::repos::normalize_remote(repo) {
+        Some(r) => r,
+        None => std::fs::canonicalize(crate::paths::expand_home(repo.as_ref()))
+            .with_context(|| format!("no such repo {repo:?}"))?
+            .display()
+            .to_string(),
+    };
+    let id = ctx.store.add_native(&repo, title.trim(), body)?;
+    let mut said = format!("queued #{id} for {repo}");
+    if !ctx
+        .cfg
+        .sources
+        .iter()
+        .any(|s| matches!(s, crate::config::SourceCfg::Native {}))
+    {
+        said.push_str(
+            "; note: the native source isn't in `sources`, so this task won't be picked up",
+        );
+    }
+    Ok(said)
+}
+
+/// Asks the daemon to stop a running job.
+pub fn stop(ctx: &Ctx, job: &str) -> Result<String> {
+    if !ctx.store.running_jobs()?.iter().any(|j| j.id == job) {
+        bail!("no running job {job}");
+    }
+    ctx.store.set_flag(&format!("stop:{job}"), Some("1"))?;
+    Ok(format!(
+        "stopping {job} (the daemon acts on it within seconds)"
+    ))
+}
+
+pub fn set_paused(ctx: &Ctx, paused: bool) -> Result<()> {
+    let at = Utc::now().to_rfc3339();
+    ctx.store
+        .set_flag(daemon::PAUSE_FLAG, paused.then_some(at.as_str()))
+}
+
+/// Opens the config in `$VISUAL` or `$EDITOR`, then checks it.
+pub fn edit_config(path: &std::path::Path) -> Result<String> {
+    if !path.exists() {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        std::fs::write(path, crate::config::EXAMPLE)?;
+    }
+    let editor = std::env::var("VISUAL")
+        .or_else(|_| std::env::var("EDITOR"))
+        .unwrap_or_else(|_| "vi".to_owned());
+    // The editor may carry flags (`code --wait`).
+    let status = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!("{editor} \"$1\""))
+        .arg("sh")
+        .arg(path)
+        .status()
+        .with_context(|| format!("starting {editor}"))?;
+    if !status.success() {
+        bail!("{editor} failed");
+    }
+    crate::config::Config::load(Some(path))
+        .context("the config has a problem; subr keeps the old one")?;
+    Ok(format!("{} is valid", path.display()))
 }
 
 /// Asks the daemon to run something next, ahead of everything else and
@@ -327,12 +438,18 @@ pub async fn run_now(ctx: &Ctx, query: &str, repo: Option<&str>) -> Result<()> {
             (c.key, c.title)
         }
     };
-    ctx.store.set_flag(NEXT_FLAG, Some(&key))?;
-    println!("{title} runs next, as soon as the budget allows");
-    if ctx.store.flag(daemon::PAUSE_FLAG)?.is_some() {
-        println!("subr is paused: subr resume to let it start");
-    } else if !daemon::heartbeat(&ctx.store).is_some_and(|h| h.alive(Utc::now())) {
-        println!("the daemon isn't running: subr once runs it now");
-    }
+    println!("{}", run_next(ctx, &key, &title)?);
     Ok(())
+}
+
+/// Puts the work with `key` first in line.
+pub fn run_next(ctx: &Ctx, key: &str, title: &str) -> Result<String> {
+    ctx.store.set_flag(NEXT_FLAG, Some(key))?;
+    let mut said = format!("{title} runs next, as soon as the budget allows");
+    if ctx.store.flag(daemon::PAUSE_FLAG)?.is_some() {
+        said.push_str("\nsubr is paused: resume to let it start");
+    } else if !daemon::heartbeat(&ctx.store).is_some_and(|h| h.alive(Utc::now())) {
+        said.push_str("\nthe daemon isn't running: subr once runs it now");
+    }
+    Ok(said)
 }

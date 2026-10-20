@@ -66,6 +66,7 @@ subr install-service         # systemd user unit, or launchd agent on macOS
 | Command | What it does |
 |---|---|
 | `subr run` | Run in the foreground; this is what the service runs. |
+| `subr tui` | Watch and steer subr in one screen: quota, jobs with their live logs and changes, and the plan. Pause, stop, add, skip, retry and run next from there (`?` lists the keys). |
 | `subr status [--json]` | Whether the daemon runs, quota windows, today's spend, and the running and recent jobs. |
 | `subr tasks [--json]` | The work subr would pick, in order, and what it skips and why. |
 | `subr once [--dry-run]` | One round now. |

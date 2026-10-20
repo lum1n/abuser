@@ -17,7 +17,7 @@ use crate::tasks::{Source, Task};
 /// (`subr run-now`). Cleared when the job starts.
 pub const NEXT_FLAG: &str = "next";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum What {
     Task(Task),
@@ -25,7 +25,7 @@ pub enum What {
 }
 
 /// One piece of work in one repo.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Work {
     pub what: What,
     pub repo: Repo,

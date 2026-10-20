@@ -73,7 +73,7 @@ pub fn install(print_only: bool, config: Option<&Path>) -> Result<()> {
         (
             launchd_plist(&exe, config),
             home.join("Library/LaunchAgents/dev.subr.plist"),
-            "launchctl load -w ~/Library/LaunchAgents/dev.subr.plist",
+            "launchctl unload ~/Library/LaunchAgents/dev.subr.plist 2>/dev/null; launchctl load -w ~/Library/LaunchAgents/dev.subr.plist",
         )
     } else {
         (
@@ -81,7 +81,8 @@ pub fn install(print_only: bool, config: Option<&Path>) -> Result<()> {
             std::env::var_os("XDG_CONFIG_HOME")
                 .map_or_else(|| home.join(".config"), std::path::PathBuf::from)
                 .join("systemd/user/subr.service"),
-            "systemctl --user daemon-reload && systemctl --user enable --now subr",
+            // `enable --now` leaves a running service on the old binary.
+            "systemctl --user daemon-reload && systemctl --user enable subr && systemctl --user restart subr",
         )
     };
     if print_only {
@@ -92,7 +93,7 @@ pub fn install(print_only: bool, config: Option<&Path>) -> Result<()> {
         std::fs::create_dir_all(dir)?;
     }
     std::fs::write(&path, text).with_context(|| format!("writing {}", path.display()))?;
-    println!("wrote {}\nstart it with: {next}", path.display());
+    println!("wrote {}\n(re)start it with: {next}", path.display());
     Ok(())
 }
 

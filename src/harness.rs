@@ -328,6 +328,87 @@ async fn read_from(path: &Path, offset: u64) -> Result<Vec<u8>> {
     Ok(buf)
 }
 
+/// One thing that happened in a session, for people to read.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct LogLine {
+    /// `agent`, `run`, `edit`, `tool`, `subagent`, `ask`, `notice`, `error` or `turn`.
+    pub kind: &'static str,
+    pub text: String,
+}
+
+/// Reads a session's log (`out.ndjson`) as [`LogLine`]s, picking up where
+/// the last [`LogReader::read`] stopped.
+pub struct LogReader {
+    session: Session,
+}
+
+impl LogReader {
+    pub fn new(id: &str, harness: Harness) -> Result<Self> {
+        let spec = SessionSpec::new(id, harness, "", harness.launch(None), 0);
+        let session = Session::attach(spec, CLIENT_TAG).context("reading the session log")?;
+        Ok(Self { session })
+    }
+
+    /// What was added to the log at `path` since the last read. The path
+    /// may change between reads to a copy of the same log.
+    pub async fn read(&mut self, path: &Path) -> Result<Vec<LogLine>> {
+        let bytes = read_from(path, self.session.offset()).await?;
+        // Only whole lines: the harness may be halfway through one.
+        let Some(end) = bytes.iter().rposition(|&b| b == b'\n') else {
+            return Ok(Vec::new());
+        };
+        let updates = self.session.feed(&bytes[..=end], now_ms());
+        Ok(updates.iter().filter_map(|u| self.line(&u.event)).collect())
+    }
+
+    fn line(&self, event: &Event) -> Option<LogLine> {
+        use acc_core::item::ItemDetail;
+        let (kind, text) = match event {
+            Event::ItemCompleted { id, detail, .. } => {
+                let item = self.session.transcript().get(id)?;
+                match detail {
+                    ItemDetail::Text if item.kind == ItemKind::AgentMessage => {
+                        ("agent", item.text.trim().to_owned())
+                    }
+                    ItemDetail::Text => return None,
+                    ItemDetail::Command {
+                        command, exit_code, ..
+                    } => (
+                        "run",
+                        match exit_code {
+                            Some(c) if *c != 0 => format!("{command}  (exit {c})"),
+                            _ => command.clone(),
+                        },
+                    ),
+                    ItemDetail::FileChange { files, .. } => (
+                        "edit",
+                        files
+                            .iter()
+                            .map(|f| f.path.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                    ),
+                    ItemDetail::Tool { tool, title, .. } => {
+                        ("tool", format!("{tool} {title}").trim().to_owned())
+                    }
+                    ItemDetail::Subagent { description, .. } => ("subagent", description.clone()),
+                }
+            }
+            Event::PermissionRequested { title, .. } => ("ask", title.clone()),
+            Event::Notice { message } => ("notice", message.clone()),
+            Event::StateChanged(s) if s.state == RunState::Error => (
+                "error",
+                s.message
+                    .clone()
+                    .unwrap_or_else(|| "harness error".to_owned()),
+            ),
+            Event::TurnCompleted => ("turn", "done".to_owned()),
+            _ => return None,
+        };
+        (!text.is_empty()).then_some(LogLine { kind, text })
+    }
+}
+
 /// Stops a session's harness by id, without its state.
 pub async fn kill_session(id: &str) -> Result<()> {
     let dir = acc_core::detached::SessionDir::new(id).context("bad session id")?;

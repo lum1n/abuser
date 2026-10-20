@@ -213,6 +213,58 @@ async fn queued_task_becomes_a_pushed_branch() {
         !tasks.contains("Add a hello file") && tasks.contains("review-recent in proj"),
         "{tasks}"
     );
+
+    // What the job did stays readable after it is gone.
+    let job = env.ok(&["job", "hello"]);
+    assert!(
+        job.contains("Add a hello file") && job.contains("Added it."),
+        "{job}"
+    );
+    assert!(!job.contains("subr-result"), "{job}");
+    let logs = env.ok(&["logs"]);
+    assert!(
+        logs.contains("agent  Added it.") && logs.contains("turn  done"),
+        "{logs}"
+    );
+
+    // A preset can be skipped, then asked for again.
+    env.ok(&["skip", "review-recent"]);
+    assert!(!env.ok(&["tasks"]).contains("review-recent in proj"));
+    let next = env.ok(&["run-now", "review-recent", "--repo", "proj"]);
+    assert!(next.contains("daemon isn't running"), "{next}");
+    let tasks = env.ok(&["tasks"]);
+    assert!(
+        tasks.contains("  1. review-recent in proj") && tasks.contains("(next)"),
+        "{tasks}"
+    );
+    assert!(env.ok(&["status"]).contains("next: preset:"));
+
+    // A queued task can be skipped, retried and removed.
+    env.ok(&["add", "Second thing", "--repo", repo.to_str().unwrap()]);
+    env.ok(&["skip", "second"]);
+    assert!(
+        env.ok(&["tasks"])
+            .contains("Second thing: skipped with `subr skip`")
+    );
+    env.ok(&["retry", "second"]);
+    assert!(env.ok(&["tasks"]).contains(". Second thing  [task"));
+    let queue = env.ok(&["queue"]);
+    assert!(queue.contains("Second thing"), "{queue}");
+    env.ok(&["queue", "rm", "2"]);
+    assert!(env.ok(&["queue"]).contains("the queue is empty"));
+
+    // Settings change in place.
+    env.ok(&["config", "set", "jobs.max_attempts", "3"]);
+    let cfg = std::fs::read_to_string(root.join("config.toml")).unwrap();
+    assert!(
+        cfg.contains("max_attempts = 3") && cfg.contains("watch_secs = 10"),
+        "{cfg}"
+    );
+    assert!(
+        !env.subr(&["config", "set", "jobs.max_attempts", "lots"])
+            .status
+            .success()
+    );
 }
 
 /// Never finishes: reports in, then works forever and ignores interrupts.
@@ -273,6 +325,9 @@ async fn job_is_stopped_at_the_daily_limit() {
             .trim()
             .is_empty()
     );
+    let diff = env.ok(&["job", "--diff"]);
+    assert!(diff.contains("?? partial.txt"), "{diff}");
+
     let again = env.ok(&["once", "--dry-run"]);
     assert!(
         again.contains("not starting") && again.contains("today"),

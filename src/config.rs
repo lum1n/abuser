@@ -330,6 +330,58 @@ impl Config {
     }
 }
 
+/// Sets (or with `None`, removes) the setting at the dotted `key` in the
+/// config file, keeping its comments and layout. `value` is TOML, or else
+/// taken as a string. The file is only written if the result is valid.
+pub fn set(path: &Path, key: &str, value: Option<&str>) -> Result<()> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
+    };
+    let mut doc: toml_edit::DocumentMut = text
+        .parse()
+        .with_context(|| format!("parsing {}", path.display()))?;
+    let keys = toml_edit::Key::parse(key).with_context(|| format!("bad key {key:?}"))?;
+    let Some((last, parents)) = keys.split_last() else {
+        bail!("empty key");
+    };
+    let mut table = doc.as_table_mut() as &mut dyn toml_edit::TableLike;
+    for k in parents {
+        if value.is_none() && !table.contains_key(k.get()) {
+            bail!("{key} isn't set");
+        }
+        let entry = table.entry(k.get()).or_insert_with(|| {
+            let mut t = toml_edit::Table::new();
+            t.set_implicit(true);
+            toml_edit::Item::Table(t)
+        });
+        table = entry
+            .as_table_like_mut()
+            .with_context(|| format!("{} in {key} isn't a table", k.get()))?;
+    }
+    match value {
+        Some(v) => {
+            let v = v
+                .parse::<toml_edit::Value>()
+                .unwrap_or_else(|_| toml_edit::Value::from(v));
+            table.insert(last.get(), toml_edit::value(v));
+        }
+        None => {
+            if table.remove(last.get()).is_none() {
+                bail!("{key} isn't set");
+            }
+        }
+    }
+    let text = doc.to_string();
+    let cfg: Config = toml::from_str(&text).with_context(|| format!("setting {key}"))?;
+    cfg.validate()?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(path, text).with_context(|| format!("writing {}", path.display()))
+}
+
 /// Commented starting point (`subr config example`).
 pub const EXAMPLE: &str = include_str!("../config.example.toml");
 
@@ -345,6 +397,39 @@ mod tests {
         let empty: Config = toml::from_str("").unwrap();
         empty.validate().unwrap();
         assert!((empty.providers["claude"].daily_limit_pct - 14.2857).abs() < 0.001);
+    }
+
+    #[test]
+    fn set_keeps_comments_and_checks_the_result() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "# mine\n[repos]\nroots = [\"~/src\"] # here\n").unwrap();
+        set(&path, "providers.claude.daily_limit_pct", Some("10")).unwrap();
+        set(&path, "providers.claude.model", Some("claude-sonnet-5")).unwrap();
+        set(&path, r#"repo."github.com/o/r".verify"#, Some("cargo test")).unwrap();
+        set(&path, "repos.active_days", Some("7")).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("# mine") && text.contains("# here"), "{text}");
+        let (cfg, _) = Config::load(Some(&path)).unwrap();
+        assert!((cfg.providers["claude"].daily_limit_pct - 10.0).abs() < f64::EPSILON);
+        assert_eq!(
+            cfg.providers["claude"].model.as_deref(),
+            Some("claude-sonnet-5")
+        );
+        assert_eq!(
+            cfg.repo["github.com/o/r"].verify.as_deref(),
+            Some("cargo test")
+        );
+        assert_eq!(cfg.repos.active_days, 7);
+
+        assert!(set(&path, "providers.claude.daily_limit_pct", Some("140")).is_err());
+        assert!(set(&path, "no_such_key", Some("1")).is_err());
+        assert!(set(&path, "repos.nope", None).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+
+        set(&path, "providers.claude.model", None).unwrap();
+        let (cfg, _) = Config::load(Some(&path)).unwrap();
+        assert!(cfg.providers["claude"].model.is_none());
     }
 
     #[test]

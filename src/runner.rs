@@ -313,7 +313,7 @@ fn job_name(now: DateTime<Utc>, slug: &str) -> String {
     name.trim_end_matches('-').to_owned()
 }
 
-async fn read_base_commit(name: &str) -> Option<String> {
+pub async fn read_base_commit(name: &str) -> Option<String> {
     let meta = crate::paths::acc_worktree(name).with_extension("meta");
     let text = tokio::fs::read_to_string(meta).await.ok()?;
     text.lines().next().map(str::to_owned)

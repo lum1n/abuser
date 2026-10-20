@@ -66,14 +66,23 @@ subr install-service         # systemd user unit, or launchd agent on macOS
 | Command | What it does |
 |---|---|
 | `subr run` | Run in the foreground; this is what the service runs. |
-| `subr status [--json]` | Quota windows, today's spend, and the running and recent jobs. |
+| `subr status [--json]` | Whether the daemon runs, quota windows, today's spend, and the running and recent jobs. |
 | `subr tasks [--json]` | The work subr would pick, in order, and what it skips and why. |
 | `subr once [--dry-run]` | One round now. |
 | `subr add "title" --repo <path or remote>` | Queue a task in subr's own queue. |
+| `subr queue` / `subr queue rm <id>` | List the queue, or remove a task from it. |
+| `subr skip <task>` | Leave a task out until `subr retry`, or put a preset off for a cooldown. |
+| `subr retry <task>` | Try a task again that was skipped, gave up or is waiting to retry. |
+| `subr run-now <task>` / `subr run-now <preset> --repo <repo>` | Run it next, whatever its attempts or cooldown say. The budget still decides when. |
 | `subr jobs` | Recent jobs with what they spent and their PRs. |
+| `subr job [<job>] [--diff]` | One job: its summary, spend and files, or its changes. |
+| `subr logs [<job>] [-f]` | What the agent did, step by step; `-f` follows a running job. |
 | `subr pause` / `subr resume` | Stop or restart starting jobs. |
 | `subr stop <job>` | Stop a running job. |
+| `subr config set <key> <value>` / `unset <key>` / `edit` | Change the config, keeping its comments. The daemon reloads it. |
 | `subr config check \| example \| path` | Check the setup, print the example config, or show the file locations. |
+
+A `<task>` is its number or part of its title as `subr tasks` shows it. A `<job>` is all or part of its id; without one, the running job or else the latest.
 
 ## Configuration
 

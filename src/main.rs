@@ -3,6 +3,7 @@
 
 mod budget;
 mod config;
+mod control;
 mod daemon;
 mod gh;
 mod harness;
@@ -78,6 +79,48 @@ enum Cmd {
         #[arg(long, default_value_t = 20)]
         limit: usize,
     },
+    /// One job: what it did, what it spent, where its files are.
+    Job {
+        /// All or part of its id (default: the running job, else the latest).
+        job: Option<String>,
+        /// Show its changes.
+        #[arg(long)]
+        diff: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// What a job's agent did, step by step.
+    Logs {
+        /// All or part of its id (default: the running job, else the latest).
+        job: Option<String>,
+        /// Keep following while the job runs.
+        #[arg(short, long)]
+        follow: bool,
+    },
+    /// subr's own queue (`subr add`).
+    Queue {
+        #[command(subcommand)]
+        cmd: Option<QueueCmd>,
+    },
+    /// Leave a task out until `subr retry`, or put a preset off a cooldown.
+    Skip {
+        /// Its number in `subr tasks`, or part of its title.
+        task: String,
+    },
+    /// Try a task again that was skipped, gave up or is waiting to retry.
+    Retry {
+        /// Part of its title, as `subr tasks` lists it under skipped.
+        task: String,
+    },
+    /// Run something next, whatever its attempts or cooldown say. The
+    /// budget still decides when.
+    RunNow {
+        /// A number or title from `subr tasks`, or a preset with --repo.
+        what: String,
+        /// Run the preset `what` in this repo (a path, remote or name).
+        #[arg(long)]
+        repo: Option<String>,
+    },
     /// Stop starting jobs (a running one finishes).
     Pause,
     /// Start jobs again.
@@ -96,9 +139,27 @@ enum Cmd {
 }
 
 #[derive(Subcommand)]
+enum QueueCmd {
+    /// Remove a queued task.
+    Rm { id: i64 },
+}
+
+#[derive(Subcommand)]
 enum ConfigCmd {
     /// Check the config, the CLIs and the logins.
     Check,
+    /// Change one setting, keeping the file's comments. The daemon picks
+    /// it up on its next round.
+    Set {
+        /// Dotted, e.g. providers.claude.daily_limit_pct or repo."github.com/o/r".verify.
+        key: String,
+        /// A TOML value; anything else is taken as a string.
+        value: String,
+    },
+    /// Remove one setting, so its default applies.
+    Unset { key: String },
+    /// Open the config in $VISUAL or $EDITOR, then check it.
+    Edit,
     /// Print a commented example config.
     Example,
     /// Print where the config and state live.
@@ -146,6 +207,19 @@ async fn run(cli: Cli) -> Result<()> {
             return Ok(());
         }
         Cmd::InstallService { print } => return service::install(*print, cli.config.as_deref()),
+        Cmd::Config(ConfigCmd::Set { key, value }) => {
+            let path = cli.config.clone().unwrap_or_else(paths::config_file);
+            config::set(&path, key, Some(value))?;
+            println!("set {key} = {value} in {}", path.display());
+            return Ok(());
+        }
+        Cmd::Config(ConfigCmd::Unset { key }) => {
+            let path = cli.config.clone().unwrap_or_else(paths::config_file);
+            config::set(&path, key, None)?;
+            println!("removed {key} from {}", path.display());
+            return Ok(());
+        }
+        Cmd::Config(ConfigCmd::Edit) => return edit_config(cli.config.as_deref()),
         _ => {}
     }
     let ctx = open(&cli)?;
@@ -182,6 +256,15 @@ async fn run(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
+        Cmd::Job { job, diff, json } => control::job(&ctx, job.as_deref(), diff, json).await,
+        Cmd::Logs { job, follow } => control::logs(&ctx, job.as_deref(), follow).await,
+        Cmd::Queue { cmd: None } => control::queue(&ctx),
+        Cmd::Queue {
+            cmd: Some(QueueCmd::Rm { id }),
+        } => control::unqueue(&ctx, id),
+        Cmd::Skip { task } => control::skip(&ctx, &task).await,
+        Cmd::Retry { task } => control::retry(&ctx, &task).await,
+        Cmd::RunNow { what, repo } => control::run_now(&ctx, &what, repo.as_deref()).await,
         Cmd::Pause => {
             ctx.store
                 .set_flag(PAUSE_FLAG, Some(&Utc::now().to_rfc3339()))?;
@@ -243,10 +326,15 @@ async fn status(ctx: &Ctx, json: bool) -> Result<()> {
     let paused = ctx.store.flag(PAUSE_FLAG)?.is_some();
     let running = ctx.store.running_jobs()?;
     let recent = ctx.store.recent_jobs(5)?;
+    let heartbeat = daemon::heartbeat(&ctx.store);
+    let alive = heartbeat.as_ref().is_some_and(|h| h.alive(Utc::now()));
+    let next = ctx.store.flag(select::NEXT_FLAG)?;
     if json {
         println!(
             "{}",
             serde_json::to_string_pretty(&serde_json::json!({
+                "daemon": {"alive": alive, "heartbeat": heartbeat},
+                "next": next,
                 "paused": paused,
                 "day_start": ctx.day_start(),
                 "providers": standings,
@@ -256,9 +344,21 @@ async fn status(ctx: &Ctx, json: bool) -> Result<()> {
         );
         return Ok(());
     }
-    if paused {
-        println!("paused (subr resume to continue)\n");
+    match &heartbeat {
+        Some(h) if alive => println!("daemon running (pid {}): {}", h.pid, h.doing),
+        Some(h) => println!(
+            "daemon not running (last seen {})",
+            h.at.with_timezone(&Local).format("%a %H:%M")
+        ),
+        None => println!("daemon not seen (not running, or older than this subr)"),
     }
+    if paused {
+        println!("paused (subr resume to continue)");
+    }
+    if let Some(n) = &next {
+        println!("next: {n}");
+    }
+    println!();
     for s in &standings {
         let snap = s.snapshot.as_ref();
         let plan = snap
@@ -311,12 +411,23 @@ async fn tasks(ctx: &Ctx, json: bool) -> Result<()> {
     if plan.work.is_empty() {
         println!("nothing to do");
     }
+    let next = ctx.store.flag(select::NEXT_FLAG)?;
     for (i, w) in plan.work.iter().enumerate() {
         let kind = match &w.what {
             select::What::Task(t) => format!("task ({})", t.source),
             select::What::Preset(_) => "preset".to_owned(),
         };
-        println!("{:>3}. {}  [{kind}]  {}", i + 1, w.title(), w.repo.key());
+        let forced = if next.as_deref() == Some(w.key().as_str()) {
+            "  (next)"
+        } else {
+            ""
+        };
+        println!(
+            "{:>3}. {}  [{kind}]  {}{forced}",
+            i + 1,
+            w.title(),
+            w.repo.key()
+        );
     }
     if !plan.skipped.is_empty() {
         println!("\nskipped");
@@ -429,6 +540,33 @@ async fn check(ctx: &Ctx) -> Result<()> {
     if !ok {
         bail!("some checks failed");
     }
+    Ok(())
+}
+
+fn edit_config(path: Option<&std::path::Path>) -> Result<()> {
+    let path = path.map_or_else(paths::config_file, std::path::Path::to_path_buf);
+    if !path.exists() {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        std::fs::write(&path, config::EXAMPLE)?;
+    }
+    let editor = std::env::var("VISUAL")
+        .or_else(|_| std::env::var("EDITOR"))
+        .unwrap_or_else(|_| "vi".to_owned());
+    // The editor may carry flags (`code --wait`).
+    let status = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!("{editor} \"$1\""))
+        .arg("sh")
+        .arg(&path)
+        .status()
+        .with_context(|| format!("starting {editor}"))?;
+    if !status.success() {
+        bail!("{editor} failed");
+    }
+    Config::load(Some(&path)).context("the config has a problem; subr keeps the old one")?;
+    println!("{} is valid", path.display());
     Ok(())
 }
 

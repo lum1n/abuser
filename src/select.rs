@@ -13,6 +13,10 @@ use crate::repos::Repo;
 use crate::store::{JobStatus, Store};
 use crate::tasks::{Source, Task};
 
+/// The key of the work to run next, whatever its attempts or cooldown say
+/// (`subr run-now`). Cleared when the job starts.
+pub const NEXT_FLAG: &str = "next";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum What {
@@ -77,6 +81,8 @@ impl Work {
 pub struct Skipped {
     pub title: String,
     pub why: String,
+    /// The work's key, when it was skipped for its attempts.
+    pub key: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -104,6 +110,7 @@ pub fn attempt_block(
         JobStatus::Blocked | JobStatus::NoChange => {
             Some(format!("agent reported {}", a.last_status.as_str()))
         }
+        JobStatus::Skipped => Some("skipped with `subr skip`".to_owned()),
         _ if a.count >= cfg.jobs.max_attempts => {
             Some(format!("gave up after {} attempts", a.count))
         }
@@ -123,6 +130,9 @@ pub async fn plan(
     now: DateTime<Utc>,
 ) -> Result<Plan> {
     let mut plan = Plan::default();
+    let next = store.flag(NEXT_FLAG)?;
+    let is_next = |w: &Work| next.as_deref() == Some(w.key().as_str());
+    let mut first: Option<Work> = None;
     let usable: Vec<Repo> = repos
         .iter()
         .filter(|r| !cfg.repo_override(r.remote.as_deref(), &r.path).skip)
@@ -151,6 +161,7 @@ pub async fn plan(
                 plan.skipped.push(Skipped {
                     title: task.title.clone(),
                     why: format!("matches tasks.exclude {e:?}"),
+                    key: None,
                 });
                 continue;
             }
@@ -165,6 +176,7 @@ pub async fn plan(
                         "no known repo matches {:?}",
                         task.repo.as_deref().unwrap_or("")
                     ),
+                    key: None,
                 });
                 continue;
             };
@@ -176,10 +188,15 @@ pub async fn plan(
             if !seen.insert(work.key()) {
                 continue;
             }
+            if is_next(&work) {
+                first = Some(work);
+                continue;
+            }
             if let Some(why) = attempt_block(store, &work.key(), cfg, now)? {
                 plan.skipped.push(Skipped {
                     title: work.title(),
                     why,
+                    key: Some(work.key()),
                 });
                 continue;
             }
@@ -217,6 +234,25 @@ pub async fn plan(
     }
     due.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
     plan.work.extend(due.into_iter().map(|(_, _, w)| w));
+
+    // The work asked for next, even a preset that isn't due or allowed here.
+    if first.is_none()
+        && let Some(next) = next.as_deref().filter(|n| n.starts_with("preset:"))
+    {
+        first = usable
+            .iter()
+            .flat_map(|r| {
+                presets.iter().map(|p| Work {
+                    what: What::Preset(p.clone()),
+                    repo: r.clone(),
+                })
+            })
+            .find(|w| w.key() == next);
+    }
+    if let Some(w) = first {
+        plan.work.retain(|x| x.key() != w.key());
+        plan.work.insert(0, w);
+    }
     Ok(plan)
 }
 
@@ -275,6 +311,48 @@ mod tests {
             .await
             .unwrap();
         assert!(p.work.is_empty());
+    }
+
+    #[tokio::test]
+    async fn next_goes_first_past_attempts_and_cooldowns() {
+        let store = Store::in_memory().unwrap();
+        store.add_native("github.com/o/new", "First", "").unwrap();
+        store.add_native("github.com/o/new", "Second", "").unwrap();
+        let cfg = Config::default();
+        let sources = crate::tasks::build(&cfg.sources, &store);
+        let repos = vec![repo("new", 1), repo("old", 30)];
+        let presets = vec![crate::presets::builtin("tests").unwrap()];
+        let now = Utc::now();
+        let p = plan(&cfg, &store, &sources, &repos, &presets, now)
+            .await
+            .unwrap();
+        let second = p.work[1].key();
+
+        // Skipped, then asked for next anyway.
+        store
+            .end_attempt(&second, JobStatus::Skipped, None)
+            .unwrap();
+        let p = plan(&cfg, &store, &sources, &repos, &presets, now)
+            .await
+            .unwrap();
+        assert_eq!(p.skipped[0].why, "skipped with `subr skip`");
+        assert_eq!(p.skipped[0].key.as_deref(), Some(second.as_str()));
+        store.set_flag(NEXT_FLAG, Some(&second)).unwrap();
+        let p = plan(&cfg, &store, &sources, &repos, &presets, now)
+            .await
+            .unwrap();
+        let titles: Vec<_> = p.work.iter().map(Work::title).collect();
+        assert_eq!(titles, ["Second", "First", "tests in new"]);
+
+        // A preset in a repo that isn't active, so never due there.
+        store
+            .set_flag(NEXT_FLAG, Some("preset:github.com/o/old:tests"))
+            .unwrap();
+        let p = plan(&cfg, &store, &sources, &repos, &presets, now)
+            .await
+            .unwrap();
+        assert_eq!(p.work[0].title(), "tests in old");
+        assert_eq!(p.work.len(), 3);
     }
 
     #[test]

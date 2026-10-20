@@ -56,6 +56,8 @@ pub enum JobStatus {
     BudgetStopped,
     TimedOut,
     Failed,
+    /// Set aside with `subr skip` (attempts only; never a job's status).
+    Skipped,
 }
 
 impl JobStatus {
@@ -68,6 +70,7 @@ impl JobStatus {
             Self::BudgetStopped => "budget_stopped",
             Self::TimedOut => "timed_out",
             Self::Failed => "failed",
+            Self::Skipped => "skipped",
         }
     }
 
@@ -79,6 +82,7 @@ impl JobStatus {
             "blocked" => Self::Blocked,
             "budget_stopped" => Self::BudgetStopped,
             "timed_out" => Self::TimedOut,
+            "skipped" => Self::Skipped,
             _ => Self::Failed,
         }
     }
@@ -286,6 +290,18 @@ impl Store {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// Jobs whose id is `pattern` or contains it, newest first.
+    pub fn find_jobs(&self, pattern: &str) -> Result<Vec<JobRow>> {
+        let db = self.db();
+        let mut st = db.prepare(&format!(
+            "SELECT {} FROM jobs WHERE id = ?1 OR instr(id, ?1) > 0
+             ORDER BY id = ?1 DESC, started DESC",
+            Self::JOB_COLS
+        ))?;
+        let rows = st.query_map([pattern], Self::job_from_row)?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
     // ---- task attempts -------------------------------------------------------
 
     /// Counts an attempt as it starts, so one that never finishes (subr was
@@ -327,6 +343,14 @@ impl Store {
                 },
             )
             .optional()?)
+    }
+
+    /// Forgets a task's attempts, so it is picked again.
+    pub fn clear_attempts(&self, key: &str) -> Result<bool> {
+        Ok(self
+            .db()
+            .execute("DELETE FROM attempts WHERE task_key = ?1", [key])?
+            > 0)
     }
 
     // ---- preset cooldowns ----------------------------------------------------
@@ -382,6 +406,14 @@ impl Store {
         self.db()
             .execute("UPDATE native_tasks SET done = 1 WHERE id = ?1", [id])?;
         Ok(())
+    }
+
+    /// Drops an open task from the queue; false when there is none.
+    pub fn remove_native(&self, id: i64) -> Result<bool> {
+        Ok(self
+            .db()
+            .execute("DELETE FROM native_tasks WHERE id = ?1 AND done = 0", [id])?
+            > 0)
     }
 
     // ---- flags ---------------------------------------------------------------
@@ -463,5 +495,46 @@ mod tests {
         // A job from before attempts were counted at the start still counts once.
         s.end_attempt("old", JobStatus::Failed, None).unwrap();
         assert_eq!(s.attempts("old").unwrap().unwrap().count, 1);
+
+        assert!(s.clear_attempts("k").unwrap());
+        assert!(s.attempts("k").unwrap().is_none());
+        assert!(!s.clear_attempts("k").unwrap());
+    }
+
+    #[test]
+    fn jobs_are_found_by_part_of_their_id() {
+        let s = Store::in_memory().unwrap();
+        for id in ["subr-1-fix-a", "subr-2-fix-b", "subr-3-docs"] {
+            s.insert_job(&JobRow {
+                id: id.into(),
+                provider: "claude".into(),
+                repo: "r".into(),
+                task_key: "k".into(),
+                title: "t".into(),
+                status: JobStatus::Running,
+                started: Utc::now(),
+                ended: None,
+                spent: 0.0,
+                pr_url: None,
+                detail: None,
+                state: None,
+            })
+            .unwrap();
+        }
+        let ids = |p: &str| -> Vec<String> {
+            s.find_jobs(p).unwrap().into_iter().map(|j| j.id).collect()
+        };
+        assert_eq!(ids("docs"), ["subr-3-docs"]);
+        assert_eq!(ids("fix").len(), 2);
+        assert!(ids("nope").is_empty());
+    }
+
+    #[test]
+    fn queued_tasks_can_be_removed() {
+        let s = Store::in_memory().unwrap();
+        let id = s.add_native("r", "t", "").unwrap();
+        assert!(s.remove_native(id).unwrap());
+        assert!(!s.remove_native(id).unwrap());
+        assert!(s.open_native().unwrap().is_empty());
     }
 }

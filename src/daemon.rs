@@ -61,7 +61,7 @@ pub struct Standing {
     pub provider: ProviderId,
     pub snapshot: Option<Snapshot>,
     pub error: Option<String>,
-    pub spent_today: f64,
+    pub used_today: f64,
     pub daily_limit: f64,
     pub verdict: Verdict,
 }
@@ -75,19 +75,19 @@ pub async fn standings(ctx: &Ctx) -> Vec<Standing> {
         } else {
             (ctx.store.snapshot(p).ok().flatten(), None)
         };
-        let spent_today = ctx.spent_today(p);
+        let used_today = ctx.used_today(p, snapshot.as_ref());
         let verdict = budget::can_start(
             &cfg,
             &ctx.cfg.schedule,
             snapshot.as_ref(),
-            spent_today,
+            used_today,
             Utc::now(),
         );
         out.push(Standing {
             provider: p,
             snapshot,
             error,
-            spent_today,
+            used_today,
             daily_limit: cfg.daily_limit_pct,
             verdict,
         });
@@ -113,8 +113,8 @@ pub fn choose_provider(ctx: &Ctx, standings: &[Standing], work: &Work) -> Option
         .iter()
         .filter(ok)
         .max_by(|a, b| {
-            (a.daily_limit - a.spent_today)
-                .partial_cmp(&(b.daily_limit - b.spent_today))
+            (a.daily_limit - a.used_today)
+                .partial_cmp(&(b.daily_limit - b.used_today))
                 .unwrap_or(std::cmp::Ordering::Equal)
         })
         .map(|s| s.provider)

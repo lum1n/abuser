@@ -75,7 +75,12 @@ impl Env {
     }
 }
 
-const RESETS: i64 = 1_900_000_000;
+/// When the weekly window resets: a day from now, so the window is near its
+/// end and its pace leaves the daily budget free.
+fn resets() -> i64 {
+    static AT: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
+    *AT.get_or_init(|| (chrono::Utc::now() + chrono::Duration::days(1)).timestamp())
+}
 
 /// A temporary `$HOME` with a Claude login, a repo with a bare remote, the
 /// fake harness and a config pointing at `usage_url`.
@@ -106,7 +111,7 @@ fn setup(fake_claude: &str, usage_url: &str, extra_config: &str) -> Env {
 
     let fake = root.join("bin/claude");
     std::fs::create_dir_all(fake.parent().unwrap()).unwrap();
-    std::fs::write(&fake, fake_claude.replace("RESETS", &RESETS.to_string())).unwrap();
+    std::fs::write(&fake, fake_claude.replace("RESETS", &resets().to_string())).unwrap();
     sh(&root, &format!("chmod +x {}", fake.display()));
 
     std::fs::write(
@@ -137,7 +142,7 @@ enabled = false
 }
 
 fn usage(weekly: f64) -> serde_json::Value {
-    let resets = chrono::DateTime::from_timestamp(RESETS, 0)
+    let resets = chrono::DateTime::from_timestamp(resets(), 0)
         .unwrap()
         .to_rfc3339();
     serde_json::json!({
@@ -305,7 +310,7 @@ async fn job_is_stopped_at_the_daily_limit() {
 
     let once = abuser_async(&env, &["once"]).await;
     assert!(once.contains("budget_stopped"), "{once}");
-    assert!(once.contains("daily limit reached"), "{once}");
+    assert!(once.contains("today's budget used up"), "{once}");
 
     // Stopped at 4 (limit 5 minus the 1-point margin), not later: with
     // readings 2 points apart, the most it can show is the reading that

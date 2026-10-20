@@ -175,8 +175,8 @@ fn standing_line(s: &Standing) -> Line<'static> {
     spans.push("   ".into());
     spans.extend(window("week", snap.and_then(|s| s.weekly.as_ref())));
     spans.push(Span::styled("   today ", DIM));
-    spans.push(bar(s.spent_today, s.daily_limit, 8));
-    spans.push(format!(" {:.1} of {:.1}%   ", s.spent_today, s.daily_limit).into());
+    spans.push(bar(s.used_today, s.daily_limit, 8));
+    spans.push(format!(" {:.1} of {:.1}%   ", s.used_today, s.daily_limit).into());
     spans.push(match &s.verdict {
         Verdict::Go => Span::styled("may start a job", Style::new().green()),
         Verdict::No(why) => Span::styled(format!("waiting: {why}"), Style::new().yellow()),

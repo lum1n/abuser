@@ -4,16 +4,16 @@ abuser runs in the background and spends what's left of your AI coding subscript
 
 The name is short for *abonnement user*: "abonnement" is Norwegian for subscription.
 
-It never goes over a daily limit you set. By default that limit is a seventh of the weekly window per day.
+It never goes over a daily limit you set. By default that limit is a seventh of the weekly window per day. Your own use counts too: abuser fills only what you leave, so the week lasts until it resets.
 
 ```
 $ abuser status
 claude (max)
   5h 0%, resets Mon 00:20  ·  week 65%, resets Tue 03:00
-  today: 3.0% of 14.3% spent  ·  may start a job
+  today: 3.0% of 14.3% used  ·  may start a job
 codex (plus)
   5h ?  ·  week 4%, resets Tue 18:20
-  today: 0.0% of 14.3% spent  ·  may start a job
+  today: 0.0% of 14.3% used  ·  may start a job
 ```
 
 ## How it works
@@ -37,8 +37,10 @@ codex (plus)
 
 Spend is measured, not estimated. While a job runs, every rise in the weekly window counts against abuser's daily budget, including anything you use yourself at the same time. This over-counts on purpose, so abuser can't under-measure its way past the limit, and it backs off while you're busy.
 
+The weekly window also sets a pace: by the end of the window's *n*-th budget day, it may be at most *n* × `daily_limit_pct` full, counting your own use. Today's budget is used up by abuser's own spend or by the window reaching that pace, whichever comes first. If you used 6% on the first day of the week, abuser has 8.3% of 14.3% left. Budget left over from quiet days carries forward to the pace, but abuser still never spends more than `daily_limit_pct` itself in a day.
+
 abuser checks the budget at least every `watch_secs` while a job runs. The job is stopped when one of these happens:
-- the day's spend reaches `daily_limit_pct − stop_margin_pct`;
+- today's budget is used up, less `stop_margin_pct`;
 - the weekly window passes `max_weekly_pct`;
 - no fresh reading has arrived for `stale_kill_after_secs`.
 

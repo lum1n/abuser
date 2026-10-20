@@ -398,8 +398,8 @@ async fn status(ctx: &Ctx, json: bool) -> Result<()> {
             fmt_window("week", snap.and_then(|s| s.weekly.as_ref()))
         );
         outln!(
-            "  today: {:.1}% of {:.1}% spent  ·  {}",
-            s.spent_today,
+            "  today: {:.1}% of {:.1}% used  ·  {}",
+            s.used_today,
             s.daily_limit,
             match &s.verdict {
                 budget::Verdict::Go => "may start a job".to_owned(),

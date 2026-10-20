@@ -78,10 +78,17 @@ impl Ctx {
         budget::day_start(Local::now(), starts)
     }
 
-    pub fn spent_today(&self, p: ProviderId) -> f64 {
-        self.store
-            .spent_since(p, self.day_start())
-            .unwrap_or(f64::INFINITY)
+    /// How much of today's budget is used, given the latest reading.
+    pub fn used_today(&self, p: ProviderId, snap: Option<&Snapshot>) -> f64 {
+        let start = self.day_start();
+        let spent = self.store.spent_since(p, start).unwrap_or(f64::INFINITY);
+        let end = start + chrono::Duration::days(1);
+        budget::used_today(
+            &self.provider_cfg(p),
+            spent,
+            snap.and_then(|s| s.weekly.as_ref()),
+            end,
+        )
     }
 
     fn source(&self, name: &str) -> Option<&dyn Source> {
@@ -379,7 +386,7 @@ async fn drive(
                 .store
                 .save_job_state(&state.name, &serde_json::to_string(&state)?);
         }
-        let spent = ctx.spent_today(state.provider);
+        let spent = ctx.used_today(state.provider, Some(&latest));
         if ctx.store.flag(&stop_key)?.is_some() {
             ctx.store.set_flag(&stop_key, None)?;
             break End::Stopped(JobStatus::Failed, "stopped with `abuser stop`".to_owned());

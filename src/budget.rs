@@ -7,6 +7,12 @@
 //! you are busy. Charges are dated, so a job that runs past the start of a
 //! new budget day charges the new day from then on.
 //!
+//! The weekly window also sets a pace: by the end of the window's n-th budget
+//! day, it may be at most n × `daily_limit_pct` full. Your own use counts
+//! here, so abuser only fills what you leave below the pace and can't push
+//! the week over it early. Today's budget is used up by whichever of the two
+//! comes first ([`used_today`]).
+//!
 //! Everything here is pure, so the rules can be tested exhaustively.
 
 use std::time::Duration;
@@ -79,9 +85,36 @@ fn no(why: impl Into<String>) -> Verdict {
     Verdict::No(why.into())
 }
 
+/// The weekly window's length; its start is a week before it resets.
+const WEEK: chrono::Duration = chrono::Duration::days(7);
+
+/// How full the weekly window may be at `day_end`: `daily_limit_pct` for
+/// each budget day of the window begun by then. `None` without a reset time.
+pub fn pace(cfg: &ProviderCfg, weekly: &Window, day_end: DateTime<Utc>) -> Option<f64> {
+    let start = weekly.resets_at? - WEEK;
+    let secs = (day_end - start).num_seconds().max(0) as f64;
+    let days = (secs / 86_400.0).ceil().clamp(1.0, 7.0);
+    Some(days * cfg.daily_limit_pct)
+}
+
+/// How much of today's budget is used: abuser's own spend `spent`, or more
+/// when the weekly window is closer to its pace than that leaves room for.
+pub fn used_today(
+    cfg: &ProviderCfg,
+    spent: f64,
+    weekly: Option<&Window>,
+    day_end: DateTime<Utc>,
+) -> f64 {
+    let room = weekly.and_then(|w| Some(pace(cfg, w, day_end)? - w.used_pct));
+    match room {
+        Some(room) => spent.max(cfg.daily_limit_pct - room),
+        None => spent,
+    }
+}
+
 /// What's left of today's budget, never negative.
-pub fn remaining(cfg: &ProviderCfg, spent_today: f64) -> f64 {
-    (cfg.daily_limit_pct - spent_today).max(0.0)
+pub fn remaining(cfg: &ProviderCfg, used_today: f64) -> f64 {
+    (cfg.daily_limit_pct - used_today).max(0.0)
 }
 
 /// Whether a new job may start now on this provider.
@@ -89,7 +122,7 @@ pub fn can_start(
     cfg: &ProviderCfg,
     schedule: &ScheduleCfg,
     snap: Option<&Snapshot>,
-    spent_today: f64,
+    used_today: f64,
     now: DateTime<Utc>,
 ) -> Verdict {
     if !cfg.enabled {
@@ -121,7 +154,7 @@ pub fn can_start(
             s.used_pct, cfg.max_session_pct
         ));
     }
-    let left = remaining(cfg, spent_today);
+    let left = remaining(cfg, used_today);
     if left < cfg.min_job_pct {
         return no(format!(
             "{left:.1}% of today's {:.1}% left (min_job_pct {:.1}%)",
@@ -139,13 +172,13 @@ pub fn can_start(
 pub fn must_stop(
     cfg: &ProviderCfg,
     snap: Option<&Snapshot>,
-    spent_today: f64,
+    used_today: f64,
     now: DateTime<Utc>,
     stale_after: Duration,
 ) -> Verdict {
-    if spent_today >= cfg.daily_limit_pct - cfg.stop_margin_pct {
+    if used_today >= cfg.daily_limit_pct - cfg.stop_margin_pct {
         return no(format!(
-            "daily limit reached: {spent_today:.1}% of {:.1}%",
+            "today's budget used up: {used_today:.1}% of {:.1}%",
             cfg.daily_limit_pct
         ));
     }
@@ -390,6 +423,40 @@ mod tests {
         let d2 = day_start(after, starts).with_timezone(&tz);
         assert_eq!((d1.day(), d1.hour()), (17, 4));
         assert_eq!((d2.day(), d2.hour()), (18, 4));
+    }
+
+    #[test]
+    fn pace_counts_your_use() {
+        let c = ProviderCfg {
+            daily_limit_pct: 10.0,
+            ..ProviderCfg::default()
+        };
+        let resets = Utc.timestamp_opt(1_900_000_000, 0).unwrap();
+        let start = resets - WEEK;
+        let weekly = |used| Window {
+            used_pct: used,
+            resets_at: Some(resets),
+        };
+        // First day, ending 22 hours into the window: you used 6%.
+        let end = start + chrono::Duration::hours(22);
+        assert_eq!(pace(&c, &weekly(6.0), end), Some(10.0));
+        assert_eq!(used_today(&c, 0.0, Some(&weekly(6.0)), end), 6.0);
+        // abuser's own spend counts when it's the larger.
+        assert_eq!(used_today(&c, 3.0, Some(&weekly(1.0)), end), 3.0);
+        // Third day: quiet earlier days leave room, but no more than the limit.
+        let end = start + chrono::Duration::hours(70);
+        assert_eq!(pace(&c, &weekly(5.0), end), Some(30.0));
+        assert_eq!(used_today(&c, 2.0, Some(&weekly(5.0)), end), 2.0);
+        // ...and a busy week leaves none.
+        assert_eq!(used_today(&c, 0.0, Some(&weekly(35.0)), end), 15.0);
+        // Past the reset the pace is the whole week; without one there's none.
+        let late = resets + chrono::Duration::hours(5);
+        assert_eq!(pace(&c, &weekly(0.0), late), Some(70.0));
+        let none = Window {
+            used_pct: 50.0,
+            resets_at: None,
+        };
+        assert_eq!(used_today(&c, 1.0, Some(&none), end), 1.0);
     }
 
     use chrono::Datelike;

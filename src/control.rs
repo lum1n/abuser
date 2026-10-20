@@ -453,3 +453,66 @@ pub fn run_next(ctx: &Ctx, key: &str, title: &str) -> Result<String> {
     }
     Ok(said)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn candidates() -> Vec<Candidate> {
+        [
+            ("gh:a/b#1", "Fix the login bug"),
+            ("gh:a/b#2", "Add tests"),
+            ("tests:repo", "Tests for repo"),
+        ]
+        .into_iter()
+        .map(|(key, title)| Candidate {
+            key: key.to_owned(),
+            title: title.to_owned(),
+            work: None,
+        })
+        .collect()
+    }
+
+    fn picked(numbered: usize, query: &str) -> Result<String> {
+        pick(candidates(), numbered, query).map(|c| c.key)
+    }
+
+    #[test]
+    fn pick_by_number_key_or_title() {
+        assert_eq!(picked(2, "1").unwrap(), "gh:a/b#1");
+        assert_eq!(picked(2, "2").unwrap(), "gh:a/b#2");
+        // Only the planned work is numbered; the skipped can't be picked so.
+        assert!(picked(2, "3").is_err());
+        assert!(picked(2, "0").is_err());
+        assert_eq!(picked(2, "tests:repo").unwrap(), "tests:repo");
+        assert_eq!(picked(2, "LOGIN").unwrap(), "gh:a/b#1");
+        assert_eq!(picked(2, "for repo").unwrap(), "tests:repo");
+    }
+
+    #[test]
+    fn pick_refuses_no_or_several_matches() {
+        let e = picked(2, "deploy").unwrap_err().to_string();
+        assert!(e.contains("nothing in `abuser tasks` matches"), "{e}");
+        let e = picked(2, "tests").unwrap_err().to_string();
+        assert!(e.contains("matches 2 things"), "{e}");
+        assert!(
+            e.contains("Add tests") && e.contains("Tests for repo"),
+            "{e}"
+        );
+    }
+
+    #[test]
+    fn readable_hides_the_result_block() {
+        let line = |kind, text: &str| LogLine {
+            kind,
+            text: text.to_owned(),
+        };
+        let r = readable(line("agent", "Done.\n\n```abuser-result\n{}\n```"));
+        assert_eq!(r, Some(line("agent", "Done.")));
+        assert_eq!(readable(line("agent", "```abuser-result\n{}\n```")), None);
+        assert_eq!(readable(line("run", "")), None);
+        // Only the agent's own messages carry the block.
+        let run = line("run", "cat x\n```abuser-result");
+        assert_eq!(readable(run.clone()), Some(run));
+    }
+}

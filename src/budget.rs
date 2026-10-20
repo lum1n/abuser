@@ -459,5 +459,63 @@ mod tests {
         assert_eq!(used_today(&c, 1.0, Some(&none), end), 1.0);
     }
 
+    #[test]
+    fn pace_counts_whole_budget_days() {
+        let c = ProviderCfg {
+            daily_limit_pct: 10.0,
+            ..ProviderCfg::default()
+        };
+        let resets = Utc.timestamp_opt(1_900_000_000, 0).unwrap();
+        let start = resets - WEEK;
+        let weekly = Window {
+            used_pct: 0.0,
+            resets_at: Some(resets),
+        };
+        let h = chrono::Duration::hours;
+        let s = chrono::Duration::seconds;
+        // A day ending exactly 24 hours in is still the first.
+        assert_eq!(pace(&c, &weekly, start + h(24)), Some(10.0));
+        assert_eq!(pace(&c, &weekly, start + h(24) + s(1)), Some(20.0));
+        // A day ending before the window began counts as its first.
+        assert_eq!(pace(&c, &weekly, start - h(30)), Some(10.0));
+        assert_eq!(pace(&c, &weekly, start), Some(10.0));
+        assert_eq!(pace(&c, &weekly, resets), Some(70.0));
+        let unknown = Window {
+            used_pct: 0.0,
+            resets_at: None,
+        };
+        assert_eq!(pace(&c, &unknown, resets), None);
+        assert_eq!(used_today(&c, 4.0, None, resets), 4.0);
+    }
+
+    #[test]
+    fn pace_stops_and_holds_jobs() {
+        let now = Utc::now();
+        let c = cfg();
+        let sched = ScheduleCfg::default();
+        let s = snap(10.0, 5.0, 10, now);
+        let stale = Duration::from_secs(300);
+        let resets = Utc.timestamp_opt(1_900_000_000, 0).unwrap();
+        // First day of the window, which may be 14% full by its end.
+        let end = resets - WEEK + chrono::Duration::hours(20);
+        let weekly = |used| Window {
+            used_pct: used,
+            resets_at: Some(resets),
+        };
+        // You used 11%: abuser has spent nothing but has only 3% left.
+        let used = used_today(&c, 0.0, Some(&weekly(11.0)), end);
+        assert_eq!(used, 11.0);
+        assert!(can_start(&c, &sched, Some(&s), used, now).ok());
+        assert!(must_stop(&c, Some(&s), used, now, stale).ok());
+        // At 13% there's too little left to start, and a running job stops.
+        let used = used_today(&c, 0.0, Some(&weekly(13.0)), end);
+        assert!(!can_start(&c, &sched, Some(&s), used, now).ok());
+        assert!(!must_stop(&c, Some(&s), used, now, stale).ok());
+        // Past the pace, nothing is left rather than less than nothing.
+        let used = used_today(&c, 0.0, Some(&weekly(40.0)), end);
+        assert_eq!(used, 40.0);
+        assert_eq!(remaining(&c, used), 0.0);
+    }
+
     use chrono::Datelike;
 }

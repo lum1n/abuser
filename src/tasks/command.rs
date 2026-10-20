@@ -1,4 +1,4 @@
-//! Any program as a task source, for trackers subr doesn't know.
+//! Any program as a task source, for trackers abuser doesn't know.
 //!
 //! - `<command> list` prints a JSON array of tasks:
 //!   `[{"id": "...", "title": "...", "body": "...", "repo": "github.com/o/r"}]`.

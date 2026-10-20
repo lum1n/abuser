@@ -1,4 +1,4 @@
-//! Finding the repositories subr may work in, most recently active first.
+//! Finding the repositories abuser may work in, most recently active first.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -23,7 +23,7 @@ pub struct Repo {
 }
 
 impl Repo {
-    /// What subr calls this repo in its state: the remote, else the path.
+    /// What abuser calls this repo in its state: the remote, else the path.
     pub fn key(&self) -> String {
         self.remote
             .clone()

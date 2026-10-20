@@ -169,8 +169,8 @@ pub async fn run(ctx: &Ctx, work: Work, provider: ProviderId) -> Result<JobRow> 
         launcher: Some(subscription_launcher(provider, pcfg.launcher.as_ref())),
         policy: crate::policy::rules(&pcfg.policy, pcfg.default_policy),
         labels: vec![
-            ("subr_job".to_owned(), name.clone()),
-            ("subr_work".to_owned(), work.key()),
+            ("abuser_job".to_owned(), name.clone()),
+            ("abuser_work".to_owned(), work.key()),
         ],
     })
     .await?;
@@ -209,7 +209,7 @@ pub async fn run(ctx: &Ctx, work: Work, provider: ProviderId) -> Result<JobRow> 
     .await
 }
 
-/// Picks up jobs that were running when subr stopped.
+/// Picks up jobs that were running when abuser stopped.
 pub async fn resume_all(ctx: &Ctx) -> Result<()> {
     for row in ctx.store.running_jobs()? {
         let Some(state) = row
@@ -306,7 +306,7 @@ fn subscription_launcher(
 
 fn job_name(now: DateTime<Utc>, slug: &str) -> String {
     let mut name = format!(
-        "subr-{}-{slug}",
+        "abuser-{}-{slug}",
         now.with_timezone(&Local).format("%Y%m%d-%H%M%S")
     );
     name.truncate(64);
@@ -382,7 +382,7 @@ async fn drive(
         let spent = ctx.spent_today(state.provider);
         if ctx.store.flag(&stop_key)?.is_some() {
             ctx.store.set_flag(&stop_key, None)?;
-            break End::Stopped(JobStatus::Failed, "stopped with `subr stop`".to_owned());
+            break End::Stopped(JobStatus::Failed, "stopped with `abuser stop`".to_owned());
         }
         if let Verdict::No(why) = budget::must_stop(&pcfg, Some(&latest), spent, Utc::now(), stale)
         {
@@ -554,7 +554,7 @@ async fn publish_work(
     let branch = format!(
         "{}{}",
         ctx.cfg.publish.branch_prefix,
-        state.name.trim_start_matches("subr-")
+        state.name.trim_start_matches("abuser-")
     );
     let local_branch = harness::branch(&state.name);
     let worktree = agent.worktree_dir();
@@ -634,7 +634,7 @@ fn pr_body(ctx: &Ctx, state: &JobState, result: Option<&AgentResult>, summary: &
         What::Preset(p) => format!("preset `{}`", p.name),
     };
     body.push_str(&format!(
-        "\n\n---\nOpened by [subr](https://github.com/lum1n/subr) ({source}, job `{}`, {} via {:.1}% of the weekly quota).",
+        "\n\n---\nOpened by [abuser](https://github.com/lum1n/abuser) ({source}, job `{}`, {} via {:.1}% of the weekly quota).",
         state.name,
         state.provider,
         spent

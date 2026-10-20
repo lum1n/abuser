@@ -1,4 +1,4 @@
-//! Where work comes from. Each source lists open tasks for the repos subr
+//! Where work comes from. Each source lists open tasks for the repos abuser
 //! knows and hears back when a task is done or failed.
 
 mod command;
@@ -58,7 +58,7 @@ pub struct Outcome {
 #[async_trait::async_trait]
 pub trait Source: Send + Sync {
     fn name(&self) -> &str;
-    /// Open tasks for `repos`. Tasks for repos subr doesn't know are dropped
+    /// Open tasks for `repos`. Tasks for repos abuser doesn't know are dropped
     /// by the caller.
     async fn list(&self, repos: &[Repo]) -> Result<Vec<Task>>;
     async fn complete(&self, task: &Task, repo: &Repo, outcome: &Outcome) -> Result<()>;

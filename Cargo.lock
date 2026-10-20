@@ -3,6 +3,33 @@
 version = 4
 
 [[package]]
+name = "abuser"
+version = "0.1.0"
+dependencies = [
+ "acc-core",
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "clap",
+ "globset",
+ "hex",
+ "ratatui",
+ "reqwest",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "toml",
+ "toml_edit",
+ "tracing",
+ "tracing-subscriber",
+ "wiremock",
+]
+
+[[package]]
 name = "acc-core"
 version = "0.1.0"
 source = "git+https://github.com/lum1n/acc?rev=984b193f63fcd6d979540eb8b4d661b332ed0484#984b193f63fcd6d979540eb8b4d661b332ed0484"
@@ -2570,33 +2597,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
-]
-
-[[package]]
-name = "subr"
-version = "0.1.0"
-dependencies = [
- "acc-core",
- "anyhow",
- "async-trait",
- "chrono",
- "clap",
- "globset",
- "hex",
- "ratatui",
- "reqwest",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2 0.11.1",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "toml",
- "toml_edit",
- "tracing",
- "tracing-subscriber",
- "wiremock",
 ]
 
 [[package]]

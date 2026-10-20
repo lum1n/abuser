@@ -1,4 +1,4 @@
-//! subr: spends what's left of your AI subscriptions on background work,
+//! abuser: spends what's left of your AI subscriptions on background work,
 //! without going over a daily limit.
 
 mod budget;
@@ -34,12 +34,12 @@ use crate::store::Store;
 
 #[derive(Parser)]
 #[command(
-    name = "subr",
+    name = "abuser",
     version,
     about = "Spend spare AI subscription quota on background coding work"
 )]
 struct Cli {
-    /// Config file (default: $SUBR_CONFIG or ~/.config/subr/config.toml).
+    /// Config file (default: $ABUSER_CONFIG or ~/.config/abuser/config.toml).
     #[arg(long, global = true)]
     config: Option<PathBuf>,
     #[command(subcommand)]
@@ -50,14 +50,14 @@ struct Cli {
 enum Cmd {
     /// Run in the foreground: watch quota and work when there is budget.
     Run,
-    /// Watch and steer subr in a terminal UI.
+    /// Watch and steer abuser in a terminal UI.
     Tui,
     /// Quota, today's spend and the latest jobs.
     Status {
         #[arg(long)]
         json: bool,
     },
-    /// The work subr would pick, in order, and what it skips.
+    /// The work abuser would pick, in order, and what it skips.
     Tasks {
         #[arg(long)]
         json: bool,
@@ -68,7 +68,7 @@ enum Cmd {
         #[arg(long)]
         dry_run: bool,
     },
-    /// Queue a task in subr's own queue.
+    /// Queue a task in abuser's own queue.
     Add {
         title: String,
         /// The repo: a path, or a remote like github.com/you/project.
@@ -100,25 +100,25 @@ enum Cmd {
         #[arg(short, long)]
         follow: bool,
     },
-    /// subr's own queue (`subr add`).
+    /// abuser's own queue (`abuser add`).
     Queue {
         #[command(subcommand)]
         cmd: Option<QueueCmd>,
     },
-    /// Leave a task out until `subr retry`, or put a preset off a cooldown.
+    /// Leave a task out until `abuser retry`, or put a preset off a cooldown.
     Skip {
-        /// Its number in `subr tasks`, or part of its title.
+        /// Its number in `abuser tasks`, or part of its title.
         task: String,
     },
     /// Try a task again that was skipped, gave up or is waiting to retry.
     Retry {
-        /// Part of its title, as `subr tasks` lists it under skipped.
+        /// Part of its title, as `abuser tasks` lists it under skipped.
         task: String,
     },
     /// Run something next, whatever its attempts or cooldown say. The
     /// budget still decides when.
     RunNow {
-        /// A number or title from `subr tasks`, or a preset with --repo.
+        /// A number or title from `abuser tasks`, or a preset with --repo.
         what: String,
         /// Run the preset `what` in this repo (a path, remote or name).
         #[arg(long)]
@@ -130,7 +130,7 @@ enum Cmd {
     Resume,
     /// Stop a running job; its worktree is discarded.
     Stop { job: String },
-    /// Install subr as a user service (systemd on Linux, launchd on macOS)
+    /// Install abuser as a user service (systemd on Linux, launchd on macOS)
     /// and start it, or restart it on this binary.
     InstallService {
         /// Print the service file instead of installing it.
@@ -173,8 +173,8 @@ enum ConfigCmd {
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_env("SUBR_LOG")
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("subr=info")),
+            tracing_subscriber::EnvFilter::try_from_env("ABUSER_LOG")
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("abuser=info")),
         )
         .with_writer(std::io::stderr)
         .with_target(false)
@@ -188,7 +188,7 @@ fn main() -> Result<()> {
 
 fn open(cli: &Cli) -> Result<Ctx> {
     let (cfg, path) = Config::load(cli.config.as_deref())?;
-    let store = Store::open(&paths::state_dir().join("subr.db"))?;
+    let store = Store::open(&paths::state_dir().join("abuser.db"))?;
     let dir = path.parent().map(PathBuf::from).unwrap_or_default();
     Ok(Ctx::new(cfg, dir, store))
 }
@@ -211,7 +211,7 @@ async fn run(cli: Cli) -> Result<()> {
             return Ok(());
         }
         Cmd::InstallService { print } => {
-            let running: Vec<String> = Store::open(&paths::state_dir().join("subr.db"))
+            let running: Vec<String> = Store::open(&paths::state_dir().join("abuser.db"))
                 .and_then(|s| s.running_jobs())
                 .map(|jobs| jobs.into_iter().map(|j| j.id).collect())
                 .unwrap_or_default();
@@ -345,10 +345,10 @@ async fn status(ctx: &Ctx, json: bool) -> Result<()> {
             "daemon not running (last seen {})",
             h.at.with_timezone(&Local).format("%a %H:%M")
         ),
-        None => println!("daemon not seen (not running, or older than this subr)"),
+        None => println!("daemon not seen (not running, or older than this abuser)"),
     }
     if paused {
-        println!("paused (subr resume to continue)");
+        println!("paused (abuser resume to continue)");
     }
     if let Some(n) = &next {
         println!("next: {n}");

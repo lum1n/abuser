@@ -1,4 +1,4 @@
-//! `subr tui`: what subr is doing, and the controls the CLI has, in one
+//! `abuser tui`: what abuser is doing, and the controls the CLI has, in one
 //! screen. It reads the same store as the daemon and steers it the same
 //! way the CLI does (through [`crate::control`]), so the daemon needn't be
 //! running for it to work.

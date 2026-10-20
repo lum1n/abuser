@@ -2,7 +2,7 @@
 //! `Agents/<project>/todos.md`, ticked with `complete_todo` and logged with
 //! `append_log`. Report-mode results become notes (`write_note`).
 //!
-//! subr only writes through the server, never to the vault's files.
+//! abuser only writes through the server, never to the vault's files.
 
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -82,8 +82,8 @@ impl Source for Lapp {
         c.call("complete_todo", json!({"remote": url, "text": task.title}))
             .await?;
         let line = match &outcome.pr_url {
-            Some(pr) => format!("subr: {} — draft PR {pr}", task.title),
-            None => format!("subr: {} — {}", task.title, first_line(&outcome.summary)),
+            Some(pr) => format!("abuser: {} — draft PR {pr}", task.title),
+            None => format!("abuser: {} — {}", task.title, first_line(&outcome.summary)),
         };
         c.call("append_log", json!({"remote": url, "text": line}))
             .await?;
@@ -96,7 +96,7 @@ impl Source for Lapp {
         };
         let mut c = McpClient::connect(&self.command).await?;
         let line = format!(
-            "subr: gave up on \"{}\" ({}): {}",
+            "abuser: gave up on \"{}\" ({}): {}",
             task.title,
             outcome.status.as_str(),
             first_line(&outcome.summary)

@@ -1,9 +1,9 @@
 //! Running agents through acc. The only module that touches `acc_core`.
 //!
 //! acc is sans-IO: it hands out shell scripts ([`Exec`]) and takes the
-//! bytes the harness writes. subr runs the scripts with `sh` on this host
+//! bytes the harness writes. abuser runs the scripts with `sh` on this host
 //! and reads the session log (`~/.acc/s/<id>/out.ndjson`) straight from
-//! disk. Sessions are detached, so a job survives a restart of subr: the
+//! disk. Sessions are detached, so a job survives a restart of abuser: the
 //! runner saves [`Agent::snapshot`] and picks it up with [`Agent::restore`].
 
 use std::path::{Path, PathBuf};
@@ -16,7 +16,7 @@ use acc_core::{Exec, Harness, RunState};
 use anyhow::{Context, Result, bail};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
-const CLIENT_TAG: &str = "subr";
+const CLIENT_TAG: &str = "abuser";
 
 /// The answer to every question an agent asks: it runs unattended.
 const NO_ONE_TO_ASK: &str = "Nobody is available to answer. Decide yourself, and note the assumption in your final summary.";

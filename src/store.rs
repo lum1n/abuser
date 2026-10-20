@@ -1,4 +1,4 @@
-//! subr's SQLite state: quota readings, budget charges, jobs, task attempts,
+//! abuser's SQLite state: quota readings, budget charges, jobs, task attempts,
 //! preset cooldowns, the native task queue and the pause flag.
 
 use std::path::Path;
@@ -56,7 +56,7 @@ pub enum JobStatus {
     BudgetStopped,
     TimedOut,
     Failed,
-    /// Set aside with `subr skip` (attempts only; never a job's status).
+    /// Set aside with `abuser skip` (attempts only; never a job's status).
     Skipped,
 }
 
@@ -304,7 +304,7 @@ impl Store {
 
     // ---- task attempts -------------------------------------------------------
 
-    /// Counts an attempt as it starts, so one that never finishes (subr was
+    /// Counts an attempt as it starts, so one that never finishes (abuser was
     /// killed, the agent couldn't start) still counts and waits its turn.
     pub fn start_attempt(&self, key: &str) -> Result<()> {
         self.db().execute(
@@ -504,7 +504,7 @@ mod tests {
     #[test]
     fn jobs_are_found_by_part_of_their_id() {
         let s = Store::in_memory().unwrap();
-        for id in ["subr-1-fix-a", "subr-2-fix-b", "subr-3-docs"] {
+        for id in ["abuser-1-fix-a", "abuser-2-fix-b", "abuser-3-docs"] {
             s.insert_job(&JobRow {
                 id: id.into(),
                 provider: "claude".into(),
@@ -524,7 +524,7 @@ mod tests {
         let ids = |p: &str| -> Vec<String> {
             s.find_jobs(p).unwrap().into_iter().map(|j| j.id).collect()
         };
-        assert_eq!(ids("docs"), ["subr-3-docs"]);
+        assert_eq!(ids("docs"), ["abuser-3-docs"]);
         assert_eq!(ids("fix").len(), 2);
         assert!(ids("nope").is_empty());
     }

@@ -11,7 +11,7 @@ use crate::harness::LogLine;
 use crate::select::{Plan, What, Work};
 use crate::store::{JobRow, JobStatus};
 
-/// One line of the plan: work subr would pick, or something it skips.
+/// One line of the plan: work abuser would pick, or something it skips.
 #[derive(Debug, Clone)]
 pub struct PlanItem {
     pub title: String,
@@ -26,7 +26,7 @@ pub struct PlanItem {
 }
 
 impl PlanItem {
-    /// The id of a task in subr's own queue.
+    /// The id of a task in abuser's own queue.
     pub fn native_id(&self) -> Option<i64> {
         match &self.work.as_ref()?.what {
             What::Task(t) if t.source == "native" => t.id.parse().ok(),

@@ -1,8 +1,8 @@
-# subr config: ~/.config/subr/config.toml (or $SUBR_CONFIG).
+# abuser config: ~/.config/abuser/config.toml (or $ABUSER_CONFIG).
 # Every setting is optional; the values shown are the defaults unless noted.
 
 [repos]
-# Where to look for git repositories. subr does nothing until this is set.
+# Where to look for git repositories. abuser does nothing until this is set.
 roots = ["~/src"]                # no default
 max_depth = 3
 active_days = 14                 # a commit this recent makes a repo "active"
@@ -50,13 +50,13 @@ watch_secs = 60
 [publish]
 push = true                      # push the branch and open a draft PR
 remote = "origin"
-branch_prefix = "subr/"
-label = "subr"
+branch_prefix = "abuser/"
+label = "abuser"
 max_open_prs = 2                 # per repo
 
 # Task sources, tried in order. The default is just the native queue.
 [[sources]]
-type = "native"                  # `subr add "..." --repo <path>`
+type = "native"                  # `abuser add "..." --repo <path>`
 
 # [[sources]]
 # type = "markdown"
@@ -64,7 +64,7 @@ type = "native"                  # `subr add "..." --repo <path>`
 
 # [[sources]]
 # type = "github"
-# label = "subr"                 # open issues with this label, via `gh`
+# label = "abuser"                 # open issues with this label, via `gh`
 
 # [[sources]]
 # type = "lapp"                  # Lapp notes app, via its MCP server
@@ -73,7 +73,7 @@ type = "native"                  # `subr add "..." --repo <path>`
 # [[sources]]
 # type = "command"               # any tracker: `<cmd> list|complete|fail`
 # name = "linear"
-# command = ["~/bin/linear-subr"]
+# command = ["~/bin/linear-abuser"]
 
 [tasks]
 exclude = []                     # skip tasks whose title contains these, e.g. ["on the Mac"]

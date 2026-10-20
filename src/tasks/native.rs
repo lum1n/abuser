@@ -1,4 +1,4 @@
-//! subr's own queue, filled with `subr add`.
+//! abuser's own queue, filled with `abuser add`.
 
 use anyhow::Result;
 

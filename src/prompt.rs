@@ -12,7 +12,7 @@ pub enum ResultStatus {
     NoChange,
 }
 
-/// What the agent reports in its final ```` ```subr-result ```` block.
+/// What the agent reports in its final ```` ```abuser-result ```` block.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentResult {
     pub status: ResultStatus,
@@ -81,7 +81,7 @@ pub fn build(p: &PromptInput<'_>) -> String {
         "- If the task can't be done, or needs a human decision, stop and say why.\n\n\
          ## Finish\n\n\
          End your final message with exactly one fenced block like this:\n\n\
-         ```subr-result\n\
+         ```abuser-result\n\
          {\"status\": \"done\", \"summary\": \"What you did and why, in Markdown.\", \
          \"pr_title\": \"Short imperative title\", \"pr_body\": \"Markdown description for reviewers.\"}\n\
          ```\n\n\
@@ -91,9 +91,9 @@ pub fn build(p: &PromptInput<'_>) -> String {
     out
 }
 
-const FENCE: &str = "```subr-result";
+const FENCE: &str = "```abuser-result";
 
-/// The last `subr-result` block in `text` that parses. The JSON is read as
+/// The last `abuser-result` block in `text` that parses. The JSON is read as
 /// one value, so fences inside its strings (code in `pr_body`) don't end it.
 pub fn parse_result(text: &str) -> Option<AgentResult> {
     text.match_indices(FENCE)
@@ -121,7 +121,7 @@ mod tests {
 
     #[test]
     fn parses_last_result_block() {
-        let text = "Did things.\n\n```subr-result\n{\"status\":\"blocked\",\"summary\":\"first\"}\n```\nThen more.\n```subr-result\n{\"status\": \"done\", \"summary\": \"Fixed it\", \"pr_title\": \"Fix X\"}\n```";
+        let text = "Did things.\n\n```abuser-result\n{\"status\":\"blocked\",\"summary\":\"first\"}\n```\nThen more.\n```abuser-result\n{\"status\": \"done\", \"summary\": \"Fixed it\", \"pr_title\": \"Fix X\"}\n```";
         let r = parse_result(text).unwrap();
         assert_eq!(r.status, ResultStatus::Done);
         assert_eq!(r.pr_title.as_deref(), Some("Fix X"));
@@ -130,7 +130,7 @@ mod tests {
 
     #[test]
     fn fences_inside_the_json() {
-        let text = "Done.\n```subr-result\n{\"status\": \"done\", \"pr_title\": \"Fix\", \"pr_body\": \"Tests:\\n```\\nok\\n```\\n\"}\n```";
+        let text = "Done.\n```abuser-result\n{\"status\": \"done\", \"pr_title\": \"Fix\", \"pr_body\": \"Tests:\\n```\\nok\\n```\\n\"}\n```";
         let r = parse_result(text).unwrap();
         assert_eq!(r.pr_title.as_deref(), Some("Fix"));
         assert!(r.pr_body.unwrap().contains("```\nok"));
@@ -139,8 +139,8 @@ mod tests {
     #[test]
     fn missing_or_broken_block() {
         assert!(parse_result("no block here").is_none());
-        assert!(parse_result("```subr-result\n{not json}\n```").is_none());
-        assert!(parse_result("```subr-result\n{\"status\":\"done\"").is_none());
+        assert!(parse_result("```abuser-result\n{not json}\n```").is_none());
+        assert!(parse_result("```abuser-result\n{\"status\":\"done\"").is_none());
     }
 
     #[test]
@@ -149,12 +149,12 @@ mod tests {
             title: "Add retries",
             body: "",
             mode: Mode::Pr,
-            branch: "acc/subr-x",
+            branch: "acc/abuser-x",
             hint: None,
             verify: Some("cargo test"),
         });
-        assert!(p.contains("`acc/subr-x`"));
+        assert!(p.contains("`acc/abuser-x`"));
         assert!(p.contains("`cargo test` must pass"));
-        assert!(p.contains("```subr-result"));
+        assert!(p.contains("```abuser-result"));
     }
 }

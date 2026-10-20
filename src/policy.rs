@@ -72,7 +72,7 @@ const ALLOW: &[&str] = &[
     "just",
 ];
 
-/// Never, whatever else is configured: publishing is subr's job.
+/// Never, whatever else is configured: publishing is abuser's job.
 const DENY: &[&str] = &["git push", "gh", "git remote", "git config"];
 
 fn shell(decision: Decision, command: &str) -> Rule {

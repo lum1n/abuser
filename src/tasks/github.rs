@@ -96,7 +96,7 @@ impl Source for Github {
             return Ok(());
         };
         let body = format!(
-            "subr tried this issue and stopped ({}):\n\n{}",
+            "abuser tried this issue and stopped ({}):\n\n{}",
             outcome.status.as_str(),
             outcome.summary
         );

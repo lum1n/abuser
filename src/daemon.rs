@@ -181,7 +181,7 @@ pub async fn tick(ctx: &Ctx, dry_run: bool) -> Result<Tick> {
             && let Some(open) = crate::publish::open_prs(&work.repo, &ctx.cfg.publish.label).await
             && open >= ctx.cfg.publish.max_open_prs
         {
-            tracing::debug!(repo = %work.repo.key(), "{open} open subr PRs; skipping");
+            tracing::debug!(repo = %work.repo.key(), "{open} open abuser PRs; skipping");
             continue;
         }
         if dry_run {
@@ -196,11 +196,11 @@ pub async fn tick(ctx: &Ctx, dry_run: bool) -> Result<Tick> {
 }
 
 /// Runs until SIGTERM or Ctrl-C. A running job's agent is stopped then, so
-/// nothing spends quota while subr isn't watching; its worktree is kept.
+/// nothing spends quota while abuser isn't watching; its worktree is kept.
 /// (After a crash, the next start reattaches to it instead.) The config
 /// file is read again between ticks when it changes.
 pub async fn run(mut ctx: Ctx, config: Option<PathBuf>) -> Result<()> {
-    tracing::info!("subr {} running", env!("CARGO_PKG_VERSION"));
+    tracing::info!("abuser {} running", env!("CARGO_PKG_VERSION"));
     let path = config.unwrap_or_else(crate::paths::config_file);
     warn_unconfigured(&ctx);
     let mut cfg_mtime = mtime(&path);
@@ -302,7 +302,7 @@ async fn nap(store: &Store, max: Duration) {
 
 fn warn_unconfigured(ctx: &Ctx) {
     if ctx.cfg.repos.roots.is_empty() {
-        tracing::warn!("repos.roots is empty: no repos to work in (see `subr config example`)");
+        tracing::warn!("repos.roots is empty: no repos to work in (see `abuser config example`)");
     }
 }
 
@@ -324,7 +324,7 @@ pub async fn stop_running(store: &Store, which: impl Fn(&str) -> bool) -> Result
             &job.id,
             crate::store::JobStatus::Failed,
             None,
-            Some("subr was stopped while it ran; the worktree is kept"),
+            Some("abuser was stopped while it ran; the worktree is kept"),
         )?;
         store.end_attempt(&job.task_key, crate::store::JobStatus::Failed, None)?;
     }

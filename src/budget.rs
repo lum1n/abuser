@@ -1,8 +1,8 @@
-//! The daily budget: what subr has spent today and whether it may spend more.
+//! The daily budget: what abuser has spent today and whether it may spend more.
 //!
 //! Spend is measured, not estimated. While a job runs, every rise in the
-//! weekly window's utilisation is charged to subr ([`Meter`]), including
-//! anything you used at the same time. That over-counts on purpose: subr can
+//! weekly window's utilisation is charged to abuser ([`Meter`]), including
+//! anything you used at the same time. That over-counts on purpose: abuser can
 //! then never exceed its limit by under-measuring, and it backs off while
 //! you are busy. Charges are dated, so a job that runs past the start of a
 //! new budget day charges the new day from then on.
@@ -62,7 +62,7 @@ impl Meter {
     }
 }
 
-/// Why a job may not start or must stop, for logs and `subr status`.
+/// Why a job may not start or must stop, for logs and `abuser status`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Verdict {
     Go,

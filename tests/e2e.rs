@@ -1,4 +1,4 @@
-//! End to end: the real `subr` binary runs a queued task through acc with a
+//! End to end: the real `abuser` binary runs a queued task through acc with a
 //! fake Claude Code, against a mock usage endpoint and a bare git remote.
 //! Everything lives in a temporary `$HOME`.
 
@@ -11,7 +11,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 /// Speaks just enough of Claude Code's stream-json: on the first prompt it
 /// reports a rate-limit window, commits a file and ends the turn with a
-/// `subr-result` block.
+/// `abuser-result` block.
 const FAKE_CLAUDE: &str = r##"#!/bin/sh
 while IFS= read -r line; do
   case "$line" in
@@ -20,7 +20,7 @@ while IFS= read -r line; do
       printf '%s\n' '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","rateLimitType":"seven_day","utilization":0.21,"resetsAt":RESETS},"session_id":"fake-1"}'
       echo hello > hello.txt
       git add hello.txt && git -c user.name=t -c user.email=t@t commit -qm "Add hello.txt"
-      printf '%s\n' '{"type":"assistant","message":{"id":"msg_1","type":"message","role":"assistant","model":"fake","content":[{"type":"text","text":"Added it.\n\n```subr-result\n{\"status\":\"done\",\"summary\":\"Added hello.txt\",\"pr_title\":\"Add hello.txt\"}\n```"}]},"session_id":"fake-1"}'
+      printf '%s\n' '{"type":"assistant","message":{"id":"msg_1","type":"message","role":"assistant","model":"fake","content":[{"type":"text","text":"Added it.\n\n```abuser-result\n{\"status\":\"done\",\"summary\":\"Added hello.txt\",\"pr_title\":\"Add hello.txt\"}\n```"}]},"session_id":"fake-1"}'
       printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"Added it.","session_id":"fake-1","num_turns":1,"total_cost_usd":0,"usage":{"input_tokens":10,"output_tokens":5}}'
       ;;
   esac
@@ -48,13 +48,13 @@ struct Env {
 }
 
 impl Env {
-    fn subr(&self, args: &[&str]) -> std::process::Output {
+    fn abuser(&self, args: &[&str]) -> std::process::Output {
         let home = self.root.join("home");
-        Command::new(env!("CARGO_BIN_EXE_subr"))
+        Command::new(env!("CARGO_BIN_EXE_abuser"))
             .args(args)
             .env("HOME", &home)
-            .env("SUBR_CONFIG", self.root.join("config.toml"))
-            .env("SUBR_STATE_DIR", self.root.join("state"))
+            .env("ABUSER_CONFIG", self.root.join("config.toml"))
+            .env("ABUSER_STATE_DIR", self.root.join("state"))
             .env_remove("XDG_CONFIG_HOME")
             .env_remove("XDG_STATE_HOME")
             .env_remove("CLAUDE_CONFIG_DIR")
@@ -64,13 +64,13 @@ impl Env {
     }
 
     fn ok(&self, args: &[&str]) -> String {
-        let out = self.subr(args);
+        let out = self.abuser(args);
         let text = format!(
             "{}{}",
             String::from_utf8_lossy(&out.stdout),
             String::from_utf8_lossy(&out.stderr)
         );
-        assert!(out.status.success(), "subr {args:?} failed:\n{text}");
+        assert!(out.status.success(), "abuser {args:?} failed:\n{text}");
         text
     }
 }
@@ -146,15 +146,15 @@ fn usage(weekly: f64) -> serde_json::Value {
     })
 }
 
-/// Runs `subr <args>` off the test's runtime, which serves the mock endpoint.
-async fn subr_async(env: &std::sync::Arc<Env>, args: &'static [&'static str]) -> String {
+/// Runs `abuser <args>` off the test's runtime, which serves the mock endpoint.
+async fn abuser_async(env: &std::sync::Arc<Env>, args: &'static [&'static str]) -> String {
     let env = env.clone();
     tokio::time::timeout(
         Duration::from_secs(240),
         tokio::task::spawn_blocking(move || env.ok(args)),
     )
     .await
-    .expect("subr took too long")
+    .expect("abuser took too long")
     .unwrap()
 }
 
@@ -177,13 +177,16 @@ async fn queued_task_becomes_a_pushed_branch() {
     env.ok(&["add", "Add a hello file", "--repo", repo.to_str().unwrap()]);
     assert!(env.ok(&["tasks"]).contains("Add a hello file"));
 
-    let once = subr_async(&env, &["once"]).await;
+    let once = abuser_async(&env, &["once"]).await;
     assert!(once.contains("done"), "{once}");
 
-    // The work arrived on the remote as a subr/ branch, with the file.
-    let branches = sh(&root.join("remote.git"), "git branch --list 'subr/*'");
+    // The work arrived on the remote as an abuser/ branch, with the file.
+    let branches = sh(&root.join("remote.git"), "git branch --list 'abuser/*'");
     let branch = branches.trim().trim_start_matches("* ").to_owned();
-    assert!(branch.starts_with("subr/"), "remote branches: {branches:?}");
+    assert!(
+        branch.starts_with("abuser/"),
+        "remote branches: {branches:?}"
+    );
     let files = sh(
         &root.join("remote.git"),
         &format!("git ls-tree --name-only {branch}"),
@@ -220,7 +223,7 @@ async fn queued_task_becomes_a_pushed_branch() {
         job.contains("Add a hello file") && job.contains("Added it."),
         "{job}"
     );
-    assert!(!job.contains("subr-result"), "{job}");
+    assert!(!job.contains("abuser-result"), "{job}");
     let logs = env.ok(&["logs"]);
     assert!(
         logs.contains("agent  Added it.") && logs.contains("turn  done"),
@@ -244,7 +247,7 @@ async fn queued_task_becomes_a_pushed_branch() {
     env.ok(&["skip", "second"]);
     assert!(
         env.ok(&["tasks"])
-            .contains("Second thing: skipped with `subr skip`")
+            .contains("Second thing: skipped with `abuser skip`")
     );
     env.ok(&["retry", "second"]);
     assert!(env.ok(&["tasks"]).contains(". Second thing  [task"));
@@ -261,7 +264,7 @@ async fn queued_task_becomes_a_pushed_branch() {
         "{cfg}"
     );
     assert!(
-        !env.subr(&["config", "set", "jobs.max_attempts", "lots"])
+        !env.abuser(&["config", "set", "jobs.max_attempts", "lots"])
             .status
             .success()
     );
@@ -300,7 +303,7 @@ async fn job_is_stopped_at_the_daily_limit() {
     let repo = env.root.join("repos/proj");
     env.ok(&["add", "Work forever", "--repo", repo.to_str().unwrap()]);
 
-    let once = subr_async(&env, &["once"]).await;
+    let once = abuser_async(&env, &["once"]).await;
     assert!(once.contains("budget_stopped"), "{once}");
     assert!(once.contains("daily limit reached"), "{once}");
 
@@ -321,7 +324,7 @@ async fn job_is_stopped_at_the_daily_limit() {
         .collect();
     assert!(kept.iter().any(|e| e.path().join("partial.txt").exists()));
     assert!(
-        sh(&env.root.join("remote.git"), "git branch --list 'subr/*'")
+        sh(&env.root.join("remote.git"), "git branch --list 'abuser/*'")
             .trim()
             .is_empty()
     );

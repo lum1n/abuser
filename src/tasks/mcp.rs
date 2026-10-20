@@ -41,7 +41,7 @@ impl McpClient {
             json!({
                 "protocolVersion": "2025-06-18",
                 "capabilities": {},
-                "clientInfo": {"name": "subr", "version": env!("CARGO_PKG_VERSION")},
+                "clientInfo": {"name": "abuser", "version": env!("CARGO_PKG_VERSION")},
             }),
         )
         .await

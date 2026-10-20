@@ -267,7 +267,7 @@ pub(crate) fn retry_after(resp: &reqwest::Response) -> Option<Duration> {
 pub(crate) fn http() -> reqwest::Client {
     reqwest::Client::builder()
         .timeout(Duration::from_secs(20))
-        .user_agent(concat!("subr/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("abuser/", env!("CARGO_PKG_VERSION")))
         .build()
         .unwrap_or_default()
 }

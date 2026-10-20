@@ -14,7 +14,7 @@ use crate::store::{JobStatus, Store};
 use crate::tasks::{Source, Task};
 
 /// The key of the work to run next, whatever its attempts or cooldown say
-/// (`subr run-now`). Cleared when the job starts.
+/// (`abuser run-now`). Cleared when the job starts.
 pub const NEXT_FLAG: &str = "next";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -76,7 +76,7 @@ impl Work {
     }
 }
 
-/// Why something was left out, for `subr tasks`.
+/// Why something was left out, for `abuser tasks`.
 #[derive(Debug, Clone, Serialize)]
 pub struct Skipped {
     pub title: String,
@@ -110,7 +110,7 @@ pub fn attempt_block(
         JobStatus::Blocked | JobStatus::NoChange => {
             Some(format!("agent reported {}", a.last_status.as_str()))
         }
-        JobStatus::Skipped => Some("skipped with `subr skip`".to_owned()),
+        JobStatus::Skipped => Some("skipped with `abuser skip`".to_owned()),
         _ if a.count >= cfg.jobs.max_attempts => {
             Some(format!("gave up after {} attempts", a.count))
         }
@@ -305,7 +305,7 @@ mod tests {
             .unwrap();
         assert_eq!(p.work.len(), 1);
 
-        // So does one that started and never finished (subr was killed).
+        // So does one that started and never finished (abuser was killed).
         store.start_attempt(&p.work[0].key()).unwrap();
         let p = plan(&cfg, &store, &sources, &repos, &presets, Utc::now())
             .await
@@ -335,7 +335,7 @@ mod tests {
         let p = plan(&cfg, &store, &sources, &repos, &presets, now)
             .await
             .unwrap();
-        assert_eq!(p.skipped[0].why, "skipped with `subr skip`");
+        assert_eq!(p.skipped[0].why, "skipped with `abuser skip`");
         assert_eq!(p.skipped[0].key.as_deref(), Some(second.as_str()));
         store.set_flag(NEXT_FLAG, Some(&second)).unwrap();
         let p = plan(&cfg, &store, &sources, &repos, &presets, now)

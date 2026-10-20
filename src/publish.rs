@@ -44,7 +44,7 @@ pub struct Request<'a> {
     pub worktree: &'a Path,
     /// acc's branch for the worktree (`acc/<name>`).
     pub local_branch: &'a str,
-    /// The branch name to publish as (`subr/<name>`).
+    /// The branch name to publish as (`abuser/<name>`).
     pub branch: &'a str,
     /// The commit the work started from.
     pub base_commit: &'a str,
@@ -88,9 +88,14 @@ async fn identity(dir: &Path) -> Vec<String> {
     if git(dir, &["config", "user.email"]).await.is_ok() {
         Vec::new()
     } else {
-        ["-c", "user.name=subr", "-c", "user.email=subr@localhost"]
-            .map(str::to_owned)
-            .to_vec()
+        [
+            "-c",
+            "user.name=abuser",
+            "-c",
+            "user.email=abuser@localhost",
+        ]
+        .map(str::to_owned)
+        .to_vec()
     }
 }
 
@@ -179,7 +184,7 @@ pub async fn publish(req: &Request<'_>, cfg: &PublishCfg) -> Result<Published> {
             "-R",
             &slug,
             "--description",
-            "Opened by subr",
+            "Opened by abuser",
             "--color",
             "8B5CF6",
         ],
@@ -243,7 +248,7 @@ fn github_slug(repo: &Repo) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// Open subr PRs in a repo. `None` when it isn't on GitHub or `gh` can't tell.
+/// Open abuser PRs in a repo. `None` when it isn't on GitHub or `gh` can't tell.
 pub async fn open_prs(repo: &Repo, label: &str) -> Option<usize> {
     let slug = github_slug(repo)?;
     let json = crate::gh::run(
@@ -305,7 +310,7 @@ mod tests {
             repo: &repo,
             worktree: &wt,
             local_branch: "acc/w",
-            branch: "subr/w",
+            branch: "abuser/w",
             base_commit: &base,
             title: "Add a.txt",
             body: "body",
@@ -313,11 +318,11 @@ mod tests {
             verify: Some("test -f a.txt"),
         };
         let p = publish(&req, &PublishCfg::default()).await.unwrap();
-        assert_eq!(p, Published::Pushed("subr/w".into()));
+        assert_eq!(p, Published::Pushed("abuser/w".into()));
         let remote_branches = git(&d.join("remote.git"), &["branch", "--list"])
             .await
             .unwrap();
-        assert!(remote_branches.contains("subr/w"));
+        assert!(remote_branches.contains("abuser/w"));
         let files = git(&wt, &["ls-tree", "-r", "--name-only", "HEAD"])
             .await
             .unwrap();

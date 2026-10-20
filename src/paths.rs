@@ -1,4 +1,4 @@
-//! Where subr keeps its config and state.
+//! Where abuser keeps its config and state.
 
 use std::path::{Path, PathBuf};
 
@@ -6,24 +6,24 @@ fn home() -> PathBuf {
     std::env::var_os("HOME").map_or_else(|| PathBuf::from("/"), PathBuf::from)
 }
 
-/// `$SUBR_CONFIG`, else `$XDG_CONFIG_HOME/subr/config.toml` (or `~/.config/...`).
+/// `$ABUSER_CONFIG`, else `$XDG_CONFIG_HOME/abuser/config.toml` (or `~/.config/...`).
 pub fn config_file() -> PathBuf {
-    if let Some(p) = std::env::var_os("SUBR_CONFIG") {
+    if let Some(p) = std::env::var_os("ABUSER_CONFIG") {
         return PathBuf::from(p);
     }
     std::env::var_os("XDG_CONFIG_HOME")
         .map_or_else(|| home().join(".config"), PathBuf::from)
-        .join("subr/config.toml")
+        .join("abuser/config.toml")
 }
 
-/// `$SUBR_STATE_DIR`, else `$XDG_STATE_HOME/subr` (or `~/.local/state/subr`).
+/// `$ABUSER_STATE_DIR`, else `$XDG_STATE_HOME/abuser` (or `~/.local/state/abuser`).
 pub fn state_dir() -> PathBuf {
-    if let Some(p) = std::env::var_os("SUBR_STATE_DIR") {
+    if let Some(p) = std::env::var_os("ABUSER_STATE_DIR") {
         return PathBuf::from(p);
     }
     std::env::var_os("XDG_STATE_HOME")
         .map_or_else(|| home().join(".local/state"), PathBuf::from)
-        .join("subr")
+        .join("abuser")
 }
 
 pub fn expand_home(p: &Path) -> PathBuf {

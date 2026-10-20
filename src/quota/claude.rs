@@ -1,6 +1,6 @@
 //! Claude Pro/Max usage from `api.anthropic.com/api/oauth/usage`.
 //!
-//! The token is Claude Code's own OAuth login. subr never refreshes it:
+//! The token is Claude Code's own OAuth login. abuser never refreshes it:
 //! Anthropic rotates refresh tokens on use, so refreshing here would sign
 //! Claude Code out. When the token has expired or is refused, the
 //! credentials are read again (Claude Code refreshes them as it runs) and

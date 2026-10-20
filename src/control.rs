@@ -1,4 +1,4 @@
-//! Looking into and steering what subr does: one job's details and log,
+//! Looking into and steering what abuser does: one job's details and log,
 //! the native queue, and skipping, retrying or forcing a piece of work.
 //! The daemon hears about changes through the store.
 
@@ -63,7 +63,7 @@ pub fn job_files(id: &str) -> JobFiles {
     }
 }
 
-/// The agent's final message, without its `subr-result` block.
+/// The agent's final message, without its `abuser-result` block.
 pub fn job_summary(files: &JobFiles) -> Option<String> {
     let text = std::fs::read_to_string(files.dir.as_ref()?.join("final.md")).ok()?;
     let text = crate::prompt::strip_result(&text);
@@ -157,7 +157,7 @@ async fn job_diff(j: &JobRow, files: &JobFiles) -> Result<()> {
     Ok(())
 }
 
-/// A job's changes as text, as `subr job --diff` shows them.
+/// A job's changes as text, as `abuser job --diff` shows them.
 pub async fn diff_text(j: &JobRow) -> Result<String> {
     let mut text = String::new();
     for mut c in diff_commands(j, &job_files(&j.id)).await? {
@@ -170,8 +170,8 @@ pub async fn diff_text(j: &JobRow) -> Result<String> {
     Ok(text)
 }
 
-/// A log line as people read it: the agent's `subr-result` block is for
-/// subr, and its summary shows elsewhere.
+/// A log line as people read it: the agent's `abuser-result` block is for
+/// abuser, and its summary shows elsewhere.
 pub fn readable(mut l: LogLine) -> Option<LogLine> {
     if l.kind == "agent" {
         l.text = crate::prompt::strip_result(&l.text).trim().to_owned();
@@ -221,7 +221,7 @@ pub async fn logs(ctx: &Ctx, query: Option<&str>, follow: bool) -> Result<()> {
 pub fn queue(ctx: &Ctx) -> Result<()> {
     let tasks = ctx.store.open_native()?;
     if tasks.is_empty() {
-        println!("the queue is empty (subr add \"title\" --repo <repo>)");
+        println!("the queue is empty (abuser add \"title\" --repo <repo>)");
     }
     for t in tasks {
         println!("#{:<4} {}  {}", t.id, t.repo, t.title);
@@ -242,14 +242,14 @@ pub fn remove(ctx: &Ctx, id: i64) -> Result<()> {
     Ok(())
 }
 
-/// Something in `subr tasks` a command can point at.
+/// Something in `abuser tasks` a command can point at.
 struct Candidate {
     key: String,
     title: String,
     work: Option<Work>,
 }
 
-/// Picks the candidate `query` names: its number in `subr tasks`, its key,
+/// Picks the candidate `query` names: its number in `abuser tasks`, its key,
 /// or part of its title.
 fn pick(candidates: Vec<Candidate>, numbered: usize, query: &str) -> Result<Candidate> {
     if let Ok(n) = query.parse::<usize>()
@@ -266,7 +266,7 @@ fn pick(candidates: Vec<Candidate>, numbered: usize, query: &str) -> Result<Cand
         .filter(|c| c.title.to_lowercase().contains(&q))
         .collect();
     match hits.len() {
-        0 => bail!("nothing in `subr tasks` matches {query:?}"),
+        0 => bail!("nothing in `abuser tasks` matches {query:?}"),
         1 => Ok(hits.remove(0)),
         n => {
             let titles: Vec<&str> = hits.iter().take(10).map(|c| c.title.as_str()).collect();
@@ -408,7 +408,7 @@ pub fn edit_config(path: &std::path::Path) -> Result<String> {
         bail!("{editor} failed");
     }
     crate::config::Config::load(Some(path))
-        .context("the config has a problem; subr keeps the old one")?;
+        .context("the config has a problem; abuser keeps the old one")?;
     Ok(format!("{} is valid", path.display()))
 }
 
@@ -447,9 +447,9 @@ pub fn run_next(ctx: &Ctx, key: &str, title: &str) -> Result<String> {
     ctx.store.set_flag(NEXT_FLAG, Some(key))?;
     let mut said = format!("{title} runs next, as soon as the budget allows");
     if ctx.store.flag(daemon::PAUSE_FLAG)?.is_some() {
-        said.push_str("\nsubr is paused: resume to let it start");
+        said.push_str("\nabuser is paused: resume to let it start");
     } else if !daemon::heartbeat(&ctx.store).is_some_and(|h| h.alive(Utc::now())) {
-        said.push_str("\nthe daemon isn't running: subr once runs it now");
+        said.push_str("\nthe daemon isn't running: abuser once runs it now");
     }
     Ok(said)
 }

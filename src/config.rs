@@ -1,7 +1,7 @@
-//! `config.toml`: what subr may spend, where it looks for work and how it runs it.
+//! `config.toml`: what abuser may spend, where it looks for work and how it runs it.
 //!
 //! Every field has a default, so an empty file is a valid config. The only
-//! thing subr can't guess is where your repositories are (`repos.roots`).
+//! thing abuser can't guess is where your repositories are (`repos.roots`).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -53,7 +53,7 @@ impl Default for Config {
 #[serde(default, deny_unknown_fields)]
 pub struct ProviderCfg {
     pub enabled: bool,
-    /// subr's own use per day, in percent of the weekly window.
+    /// abuser's own use per day, in percent of the weekly window.
     pub daily_limit_pct: f64,
     /// Don't start a job when the weekly window is above this.
     pub max_weekly_pct: f64,
@@ -152,7 +152,7 @@ impl Default for ReposCfg {
 #[serde(default, deny_unknown_fields)]
 pub struct JobsCfg {
     pub timeout_mins: u64,
-    /// Tries per task before subr gives up on it.
+    /// Tries per task before abuser gives up on it.
     pub max_attempts: u32,
     /// Hours before a failed task is tried again.
     pub retry_after_hours: u64,
@@ -182,7 +182,7 @@ pub struct PublishCfg {
     pub remote: String,
     pub branch_prefix: String,
     pub label: String,
-    /// Skip a repo that already has this many open subr PRs.
+    /// Skip a repo that already has this many open abuser PRs.
     pub max_open_prs: usize,
 }
 
@@ -191,8 +191,8 @@ impl Default for PublishCfg {
         Self {
             push: true,
             remote: "origin".to_owned(),
-            branch_prefix: "subr/".to_owned(),
-            label: "subr".to_owned(),
+            branch_prefix: "abuser/".to_owned(),
+            label: "abuser".to_owned(),
             max_open_prs: 2,
         }
     }
@@ -209,7 +209,7 @@ pub struct TasksCfg {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SourceCfg {
-    /// subr's own queue (`subr add`).
+    /// abuser's own queue (`abuser add`).
     Native {},
     /// `- [ ]` lines in a file in each repo.
     Markdown {
@@ -236,7 +236,7 @@ fn default_todo_file() -> String {
     "TODO.md".to_owned()
 }
 fn default_label() -> String {
-    "subr".to_owned()
+    "abuser".to_owned()
 }
 fn default_lapp_command() -> Vec<String> {
     vec!["lapp-headless".to_owned(), "mcp".to_owned()]
@@ -382,7 +382,7 @@ pub fn set(path: &Path, key: &str, value: Option<&str>) -> Result<()> {
     std::fs::write(path, text).with_context(|| format!("writing {}", path.display()))
 }
 
-/// Commented starting point (`subr config example`).
+/// Commented starting point (`abuser config example`).
 pub const EXAMPLE: &str = include_str!("../config.example.toml");
 
 #[cfg(test)]

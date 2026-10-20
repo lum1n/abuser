@@ -85,7 +85,7 @@ fn popup(area: Rect, width: u16, height: u16) -> Rect {
 fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     let d = &app.data;
     let mut top = vec![
-        Span::styled(" subr ", Style::new().bold().reversed()),
+        Span::styled(" abuser ", Style::new().bold().reversed()),
         " ".into(),
     ];
     match &d.heartbeat {
@@ -529,12 +529,12 @@ mod tests {
     #[test]
     fn shows_jobs_plan_and_the_selected_log() {
         let mut app = App::default();
-        app.set_jobs(vec![job("subr-1-run", JobStatus::Running)]);
+        app.set_jobs(vec![job("abuser-1-run", JobStatus::Running)]);
         let item = native("1", "Fix the flaky test");
         app.data.next = item.key.clone();
         app.set_plan(vec![item]);
         app.texts.insert(
-            "subr-1-run".into(),
+            "abuser-1-run".into(),
             JobText {
                 log: vec![crate::harness::LogLine {
                     kind: "run",
@@ -548,7 +548,7 @@ mod tests {
             "daemon not seen",
             "reading quota…",
             "jobs · 1 running",
-            "title of subr-1-run",
+            "title of abuser-1-run",
             "Fix the flaky test",
             "next: Fix the flaky test",
             "run cargo test",

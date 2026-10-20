@@ -1,14 +1,14 @@
 [package]
-name = "subr"
+name = "abuser"
 description = "Spend spare AI subscription quota on background coding work, within a daily limit"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
-repository = "https://github.com/lum1n/subr"
+repository = "https://github.com/lum1n/abuser"
 license = "MIT"
 
 [dependencies]
-# Pinned: acc is young and moves fast. All of subr's use of it is in src/harness.rs.
+# Pinned: acc is young and moves fast. All of abuser's use of it is in src/harness.rs.
 acc-core = { git = "https://github.com/lum1n/acc", rev = "984b193f63fcd6d979540eb8b4d661b332ed0484" }
 anyhow = "1.0.104"
 async-trait = "0.1.92"

@@ -337,3 +337,19 @@ async fn job_is_stopped_at_the_daily_limit() {
         "{again}"
     );
 }
+
+/// `abuser config example | head -1`: when the reader is gone, abuser stops
+/// quietly instead of panicking on the closed pipe.
+#[test]
+fn closed_stdout_pipe_exits_quietly() {
+    let (reader, writer) = std::io::pipe().unwrap();
+    drop(reader);
+    let out = Command::new(env!("CARGO_BIN_EXE_abuser"))
+        .args(["config", "example"])
+        .stdout(writer)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{:?}: {stderr}", out.status);
+    assert!(!stderr.contains("panicked"), "{stderr}");
+}

@@ -75,7 +75,7 @@ pub async fn job(ctx: &Ctx, query: Option<&str>, diff: bool, json: bool) -> Resu
     let files = job_files(&j.id);
     let summary = job_summary(&files);
     if json {
-        println!(
+        outln!(
             "{}",
             serde_json::to_string_pretty(&serde_json::json!({
                 "job": j,
@@ -89,16 +89,16 @@ pub async fn job(ctx: &Ctx, query: Option<&str>, diff: bool, json: bool) -> Resu
         return job_diff(&j, &files).await;
     }
     let ran = j.ended.unwrap_or_else(Utc::now) - j.started;
-    println!("{}", j.id);
-    println!("  title     {}", j.title);
-    println!("  repo      {}", j.repo);
-    println!(
+    outln!("{}", j.id);
+    outln!("  title     {}", j.title);
+    outln!("  repo      {}", j.repo);
+    outln!(
         "  status    {}  ·  {}  ·  {:.1}% of the weekly window",
         j.status.as_str(),
         j.provider,
         j.spent
     );
-    println!(
+    outln!(
         "  started   {}  ·  {} {}m",
         j.started.with_timezone(&Local).format("%Y-%m-%d %H:%M"),
         if j.status == JobStatus::Running {
@@ -109,19 +109,19 @@ pub async fn job(ctx: &Ctx, query: Option<&str>, diff: bool, json: bool) -> Resu
         ran.num_minutes()
     );
     if let Some(pr) = &j.pr_url {
-        println!("  pr        {pr}");
+        outln!("  pr        {pr}");
     }
     if let Some(d) = j.detail.as_deref().filter(|d| !d.is_empty()) {
-        println!("  detail    {d}");
+        outln!("  detail    {d}");
     }
     if let Some(w) = &files.worktree {
-        println!("  worktree  {}", w.display());
+        outln!("  worktree  {}", w.display());
     }
     if let Some(d) = &files.dir {
-        println!("  files     {}", d.display());
+        outln!("  files     {}", d.display());
     }
     if let Some(s) = summary {
-        println!("\n{s}");
+        outln!("\n{s}");
     }
     Ok(())
 }
@@ -181,9 +181,9 @@ pub fn readable(mut l: LogLine) -> Option<LogLine> {
 
 pub fn print_log_line(l: &LogLine) {
     let mut lines = l.text.lines();
-    println!("{:>8}  {}", l.kind, lines.next().unwrap_or(""));
+    outln!("{:>8}  {}", l.kind, lines.next().unwrap_or(""));
     for rest in lines {
-        println!("{:>8}  {rest}", "");
+        outln!("{:>8}  {rest}", "");
     }
 }
 
@@ -221,17 +221,17 @@ pub async fn logs(ctx: &Ctx, query: Option<&str>, follow: bool) -> Result<()> {
 pub fn queue(ctx: &Ctx) -> Result<()> {
     let tasks = ctx.store.open_native()?;
     if tasks.is_empty() {
-        println!("the queue is empty (abuser add \"title\" --repo <repo>)");
+        outln!("the queue is empty (abuser add \"title\" --repo <repo>)");
     }
     for t in tasks {
-        println!("#{:<4} {}  {}", t.id, t.repo, t.title);
+        outln!("#{:<4} {}  {}", t.id, t.repo, t.title);
     }
     Ok(())
 }
 
 pub fn unqueue(ctx: &Ctx, id: i64) -> Result<()> {
     remove(ctx, id)?;
-    println!("removed #{id}");
+    outln!("removed #{id}");
     Ok(())
 }
 
@@ -306,7 +306,7 @@ pub async fn skip(ctx: &Ctx, query: &str) -> Result<()> {
     let Some(work) = &c.work else {
         bail!("{} is skipped already", c.title);
     };
-    println!("{}", skip_work(ctx, work)?);
+    outln!("{}", skip_work(ctx, work)?);
     Ok(())
 }
 
@@ -337,7 +337,7 @@ pub async fn retry(ctx: &Ctx, query: &str) -> Result<()> {
     let skipped: Vec<Candidate> = cands.into_iter().filter(|c| c.work.is_none()).collect();
     let c = pick(skipped, 0, query)?;
     ctx.store.clear_attempts(&c.key)?;
-    println!("{} will be picked again", c.title);
+    outln!("{} will be picked again", c.title);
     Ok(())
 }
 
@@ -438,7 +438,7 @@ pub async fn run_now(ctx: &Ctx, query: &str, repo: Option<&str>) -> Result<()> {
             (c.key, c.title)
         }
     };
-    println!("{}", run_next(ctx, &key, &title)?);
+    outln!("{}", run_next(ctx, &key, &title)?);
     Ok(())
 }
 

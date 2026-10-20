@@ -120,21 +120,21 @@ pub fn install(print_only: bool, config: Option<&Path>, running_jobs: &[String])
         )
     };
     if print_only {
-        print!("{text}");
+        out!("{text}");
         return Ok(());
     }
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
     std::fs::write(&path, text).with_context(|| format!("writing {}", path.display()))?;
-    println!("wrote {}", path.display());
+    outln!("wrote {}", path.display());
     let manual = format!("{} && {}", cmds.setup, cmds.restart);
     if !sh(cmds.setup) {
         bail!("couldn't register the service; start it yourself with: {manual}");
     }
     let active = sh(cmds.active);
     if active && let Some(job) = running_jobs.first() {
-        println!(
+        outln!(
             "not restarting: job {job} is running, and a restart would stop it.\n\
              Restart when it's done with: {}",
             cmds.restart
@@ -144,7 +144,7 @@ pub fn install(print_only: bool, config: Option<&Path>, running_jobs: &[String])
     if !sh(cmds.restart) {
         bail!("couldn't start the service; try: {manual}");
     }
-    println!(
+    outln!(
         "{} abuser {}",
         if active { "restarted" } else { "started" },
         env!("CARGO_PKG_VERSION")

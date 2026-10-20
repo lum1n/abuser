@@ -1,6 +1,28 @@
 //! abuser: spends what's left of your AI subscriptions on background work,
 //! without going over a daily limit.
 
+/// `println!` that ends the process quietly when stdout is a closed pipe
+/// (`abuser jobs | head`), where `println!` would panic. Rust ignores
+/// SIGPIPE, and restoring it would also kill the daemon on a child's pipe.
+macro_rules! outln {
+    ($($arg:tt)*) => {{
+        use std::io::Write as _;
+        if let Err(e) = writeln!(std::io::stdout(), $($arg)*) {
+            $crate::stdout_failed(e);
+        }
+    }};
+}
+
+/// `print!` with the same handling as `outln!`.
+macro_rules! out {
+    ($($arg:tt)*) => {{
+        use std::io::Write as _;
+        if let Err(e) = write!(std::io::stdout(), $($arg)*) {
+            $crate::stdout_failed(e);
+        }
+    }};
+}
+
 mod budget;
 mod config;
 mod control;
@@ -186,6 +208,15 @@ fn main() -> Result<()> {
         .block_on(run(cli))
 }
 
+/// Whoever reads our output stopped reading: exit like a SIGPIPE'd tool
+/// would, without a panic. Any other write error is a real failure.
+fn stdout_failed(e: std::io::Error) -> ! {
+    if e.kind() == std::io::ErrorKind::BrokenPipe {
+        std::process::exit(0);
+    }
+    panic!("failed printing to stdout: {e}");
+}
+
 fn open(cli: &Cli) -> Result<Ctx> {
     let (cfg, path) = Config::load(cli.config.as_deref())?;
     let store = Store::open(&paths::state_dir().join("abuser.db"))?;
@@ -196,18 +227,18 @@ fn open(cli: &Cli) -> Result<Ctx> {
 async fn run(cli: Cli) -> Result<()> {
     match &cli.cmd {
         Cmd::Config(ConfigCmd::Example) => {
-            print!("{}", config::EXAMPLE);
+            out!("{}", config::EXAMPLE);
             return Ok(());
         }
         Cmd::Config(ConfigCmd::Path) => {
-            println!(
+            outln!(
                 "config: {}",
                 cli.config
                     .clone()
                     .unwrap_or_else(paths::config_file)
                     .display()
             );
-            println!("state:  {}", paths::state_dir().display());
+            outln!("state:  {}", paths::state_dir().display());
             return Ok(());
         }
         Cmd::InstallService { print } => {
@@ -220,18 +251,18 @@ async fn run(cli: Cli) -> Result<()> {
         Cmd::Config(ConfigCmd::Set { key, value }) => {
             let path = cli.config.clone().unwrap_or_else(paths::config_file);
             config::set(&path, key, Some(value))?;
-            println!("set {key} = {value} in {}", path.display());
+            outln!("set {key} = {value} in {}", path.display());
             return Ok(());
         }
         Cmd::Config(ConfigCmd::Unset { key }) => {
             let path = cli.config.clone().unwrap_or_else(paths::config_file);
             config::set(&path, key, None)?;
-            println!("removed {key} from {}", path.display());
+            outln!("removed {key} from {}", path.display());
             return Ok(());
         }
         Cmd::Config(ConfigCmd::Edit) => {
             let path = cli.config.clone().unwrap_or_else(paths::config_file);
-            println!("{}", control::edit_config(&path)?);
+            outln!("{}", control::edit_config(&path)?);
             return Ok(());
         }
         _ => {}
@@ -247,7 +278,7 @@ async fn run(cli: Cli) -> Result<()> {
         Cmd::Tasks { json } => tasks(&ctx, json).await,
         Cmd::Once { dry_run } => once(&ctx, dry_run).await,
         Cmd::Add { title, repo, body } => {
-            println!("{}", control::add(&ctx, &title, &repo, &body)?);
+            outln!("{}", control::add(&ctx, &title, &repo, &body)?);
             Ok(())
         }
         Cmd::Jobs { limit } => {
@@ -267,16 +298,16 @@ async fn run(cli: Cli) -> Result<()> {
         Cmd::RunNow { what, repo } => control::run_now(&ctx, &what, repo.as_deref()).await,
         Cmd::Pause => {
             control::set_paused(&ctx, true)?;
-            println!("paused");
+            outln!("paused");
             Ok(())
         }
         Cmd::Resume => {
             control::set_paused(&ctx, false)?;
-            println!("resumed");
+            outln!("resumed");
             Ok(())
         }
         Cmd::Stop { job } => {
-            println!("{}", control::stop(&ctx, &job)?);
+            outln!("{}", control::stop(&ctx, &job)?);
             Ok(())
         }
         Cmd::Config(ConfigCmd::Check) => check(&ctx).await,
@@ -285,7 +316,7 @@ async fn run(cli: Cli) -> Result<()> {
 }
 
 fn print_job(j: &store::JobRow) {
-    println!(
+    outln!(
         "{}  {:<14} {:<6} {:>5.1}%  {}  {}{}",
         j.started.with_timezone(&Local).format("%m-%d %H:%M"),
         j.status.as_str(),
@@ -299,7 +330,7 @@ fn print_job(j: &store::JobRow) {
             .unwrap_or_default(),
     );
     if let Some(d) = j.detail.as_deref().filter(|d| !d.is_empty()) {
-        println!("    {d}");
+        outln!("    {d}");
     }
 }
 
@@ -325,7 +356,7 @@ async fn status(ctx: &Ctx, json: bool) -> Result<()> {
     let alive = heartbeat.as_ref().is_some_and(|h| h.alive(Utc::now()));
     let next = ctx.store.flag(select::NEXT_FLAG)?;
     if json {
-        println!(
+        outln!(
             "{}",
             serde_json::to_string_pretty(&serde_json::json!({
                 "daemon": {"alive": alive, "heartbeat": heartbeat},
@@ -340,33 +371,33 @@ async fn status(ctx: &Ctx, json: bool) -> Result<()> {
         return Ok(());
     }
     match &heartbeat {
-        Some(h) if alive => println!("daemon running (pid {}): {}", h.pid, h.doing),
-        Some(h) => println!(
+        Some(h) if alive => outln!("daemon running (pid {}): {}", h.pid, h.doing),
+        Some(h) => outln!(
             "daemon not running (last seen {})",
             h.at.with_timezone(&Local).format("%a %H:%M")
         ),
-        None => println!("daemon not seen (not running, or older than this abuser)"),
+        None => outln!("daemon not seen (not running, or older than this abuser)"),
     }
     if paused {
-        println!("paused (abuser resume to continue)");
+        outln!("paused (abuser resume to continue)");
     }
     if let Some(n) = &next {
-        println!("next: {n}");
+        outln!("next: {n}");
     }
-    println!();
+    outln!();
     for s in &standings {
         let snap = s.snapshot.as_ref();
         let plan = snap
             .and_then(|s| s.plan.as_deref())
             .map(|p| format!(" ({p})"))
             .unwrap_or_default();
-        println!("{}{plan}", s.provider);
-        println!(
+        outln!("{}{plan}", s.provider);
+        outln!(
             "  {}  ·  {}",
             fmt_window("5h", snap.and_then(|s| s.session.as_ref())),
             fmt_window("week", snap.and_then(|s| s.weekly.as_ref()))
         );
-        println!(
+        outln!(
             "  today: {:.1}% of {:.1}% spent  ·  {}",
             s.spent_today,
             s.daily_limit,
@@ -376,17 +407,17 @@ async fn status(ctx: &Ctx, json: bool) -> Result<()> {
             }
         );
         if let Some(e) = &s.error {
-            println!("  quota: {e}");
+            outln!("  quota: {e}");
         }
     }
     if !running.is_empty() {
-        println!("\nrunning");
+        outln!("\nrunning");
         for j in &running {
             print_job(j);
         }
     }
     if !recent.is_empty() {
-        println!("\nrecent");
+        outln!("\nrecent");
         for j in recent
             .iter()
             .filter(|j| j.status != store::JobStatus::Running)
@@ -400,11 +431,11 @@ async fn status(ctx: &Ctx, json: bool) -> Result<()> {
 async fn tasks(ctx: &Ctx, json: bool) -> Result<()> {
     let plan = daemon::plan(ctx).await?;
     if json {
-        println!("{}", serde_json::to_string_pretty(&plan)?);
+        outln!("{}", serde_json::to_string_pretty(&plan)?);
         return Ok(());
     }
     if plan.work.is_empty() {
-        println!("nothing to do");
+        outln!("nothing to do");
     }
     let next = ctx.store.flag(select::NEXT_FLAG)?;
     for (i, w) in plan.work.iter().enumerate() {
@@ -417,7 +448,7 @@ async fn tasks(ctx: &Ctx, json: bool) -> Result<()> {
         } else {
             ""
         };
-        println!(
+        outln!(
             "{:>3}. {}  [{kind}]  {}{forced}",
             i + 1,
             w.title(),
@@ -425,13 +456,13 @@ async fn tasks(ctx: &Ctx, json: bool) -> Result<()> {
         );
     }
     if !plan.skipped.is_empty() {
-        println!("\nskipped");
+        outln!("\nskipped");
         for s in &plan.skipped {
-            println!("  {}: {}", s.title, s.why);
+            outln!("  {}: {}", s.title, s.why);
         }
     }
     for e in &plan.errors {
-        println!("\nerror: {e}");
+        outln!("\nerror: {e}");
     }
     Ok(())
 }
@@ -448,20 +479,20 @@ async fn once(ctx: &Ctx, dry_run: bool) -> Result<()> {
     let tick = tokio::select! {
         t = daemon::tick(ctx, dry_run) => t?,
         _ = tokio::signal::ctrl_c() => {
-            println!("interrupted; stopping the job");
+            outln!("interrupted; stopping the job");
             return daemon::stop_running(&ctx.store, |id| !before.iter().any(|b| b == id)).await;
         }
     };
     match tick {
-        Tick::Paused => println!("paused"),
+        Tick::Paused => outln!("paused"),
         Tick::NoBudget(why) => {
-            println!("not starting:");
+            outln!("not starting:");
             for w in why {
-                println!("  {w}");
+                outln!("  {w}");
             }
         }
-        Tick::NothingToDo => println!("nothing to do"),
-        Tick::Would(w, p) => println!("would run on {p}: {}  ({})", w.title(), w.repo.key()),
+        Tick::NothingToDo => outln!("nothing to do"),
+        Tick::Would(w, p) => outln!("would run on {p}: {}  ({})", w.title(), w.repo.key()),
         Tick::Ran(j) => print_job(&j),
     }
     Ok(())
@@ -471,7 +502,7 @@ async fn check(ctx: &Ctx) -> Result<()> {
     let mut ok = true;
     let mut line = |good: bool, what: &str, detail: String| {
         ok &= good;
-        println!("{} {what}: {detail}", if good { "ok  " } else { "FAIL" });
+        outln!("{} {what}: {detail}", if good { "ok  " } else { "FAIL" });
     };
     line(true, "config", "valid".to_owned());
     line(

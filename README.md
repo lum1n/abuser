@@ -58,7 +58,7 @@ cargo install --git https://github.com/lum1n/subr
 subr config example > ~/.config/subr/config.toml   # then set repos.roots
 subr config check
 subr once --dry-run          # what would run now, and why
-subr install-service         # systemd user unit, or launchd agent on macOS
+subr install-service         # systemd user unit, or launchd agent on macOS; (re)starts it
 ```
 
 ## Commands

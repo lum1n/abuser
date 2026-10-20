@@ -130,7 +130,8 @@ enum Cmd {
     Resume,
     /// Stop a running job; its worktree is discarded.
     Stop { job: String },
-    /// Install subr as a user service (systemd on Linux, launchd on macOS).
+    /// Install subr as a user service (systemd on Linux, launchd on macOS)
+    /// and start it, or restart it on this binary.
     InstallService {
         /// Print the service file instead of installing it.
         #[arg(long)]
@@ -209,7 +210,13 @@ async fn run(cli: Cli) -> Result<()> {
             println!("state:  {}", paths::state_dir().display());
             return Ok(());
         }
-        Cmd::InstallService { print } => return service::install(*print, cli.config.as_deref()),
+        Cmd::InstallService { print } => {
+            let running: Vec<String> = Store::open(&paths::state_dir().join("subr.db"))
+                .and_then(|s| s.running_jobs())
+                .map(|jobs| jobs.into_iter().map(|j| j.id).collect())
+                .unwrap_or_default();
+            return service::install(*print, cli.config.as_deref(), &running);
+        }
         Cmd::Config(ConfigCmd::Set { key, value }) => {
             let path = cli.config.clone().unwrap_or_else(paths::config_file);
             config::set(&path, key, Some(value))?;

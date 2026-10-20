@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 
 fn exe() -> Result<String> {
     Ok(std::env::current_exe()
@@ -66,14 +66,49 @@ pub fn launchd_plist(exe: &str, config: Option<&Path>) -> String {
     )
 }
 
-pub fn install(print_only: bool, config: Option<&Path>) -> Result<()> {
+/// How to (re)start the service on this platform.
+struct Commands {
+    /// Makes the service manager read the new file and start it at login.
+    setup: &'static str,
+    /// Whether the service runs now.
+    active: &'static str,
+    /// Starts it, or restarts it on the new binary.
+    restart: &'static str,
+}
+
+const SYSTEMD: Commands = Commands {
+    setup: "systemctl --user daemon-reload && systemctl --user enable -q subr",
+    active: "systemctl --user is-active -q subr",
+    // `enable --now` would leave a running service on the old binary.
+    restart: "systemctl --user restart subr",
+};
+
+const LAUNCHD: Commands = Commands {
+    setup: "true",
+    active: "launchctl list dev.subr >/dev/null 2>&1",
+    restart: "launchctl unload ~/Library/LaunchAgents/dev.subr.plist 2>/dev/null; \
+              launchctl load -w ~/Library/LaunchAgents/dev.subr.plist",
+};
+
+fn sh(script: &str) -> bool {
+    std::process::Command::new("sh")
+        .arg("-c")
+        .arg(script)
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+/// Writes the service file, then starts the service, or restarts it so it
+/// runs this binary. A running job isn't cut short: then it says how to
+/// restart once the job is done.
+pub fn install(print_only: bool, config: Option<&Path>, running_jobs: &[String]) -> Result<()> {
     let exe = exe()?;
     let home = std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
-    let (text, path, next) = if cfg!(target_os = "macos") {
+    let (text, path, cmds) = if cfg!(target_os = "macos") {
         (
             launchd_plist(&exe, config),
             home.join("Library/LaunchAgents/dev.subr.plist"),
-            "launchctl unload ~/Library/LaunchAgents/dev.subr.plist 2>/dev/null; launchctl load -w ~/Library/LaunchAgents/dev.subr.plist",
+            LAUNCHD,
         )
     } else {
         (
@@ -81,8 +116,7 @@ pub fn install(print_only: bool, config: Option<&Path>) -> Result<()> {
             std::env::var_os("XDG_CONFIG_HOME")
                 .map_or_else(|| home.join(".config"), std::path::PathBuf::from)
                 .join("systemd/user/subr.service"),
-            // `enable --now` leaves a running service on the old binary.
-            "systemctl --user daemon-reload && systemctl --user enable subr && systemctl --user restart subr",
+            SYSTEMD,
         )
     };
     if print_only {
@@ -93,7 +127,28 @@ pub fn install(print_only: bool, config: Option<&Path>) -> Result<()> {
         std::fs::create_dir_all(dir)?;
     }
     std::fs::write(&path, text).with_context(|| format!("writing {}", path.display()))?;
-    println!("wrote {}\n(re)start it with: {next}", path.display());
+    println!("wrote {}", path.display());
+    let manual = format!("{} && {}", cmds.setup, cmds.restart);
+    if !sh(cmds.setup) {
+        bail!("couldn't register the service; start it yourself with: {manual}");
+    }
+    let active = sh(cmds.active);
+    if active && let Some(job) = running_jobs.first() {
+        println!(
+            "not restarting: job {job} is running, and a restart would stop it.\n\
+             Restart when it's done with: {}",
+            cmds.restart
+        );
+        return Ok(());
+    }
+    if !sh(cmds.restart) {
+        bail!("couldn't start the service; try: {manual}");
+    }
+    println!(
+        "{} subr {}",
+        if active { "restarted" } else { "started" },
+        env!("CARGO_PKG_VERSION")
+    );
     Ok(())
 }
 

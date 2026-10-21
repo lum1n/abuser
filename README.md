@@ -37,7 +37,7 @@ codex (plus)
 
 Spend is measured, not estimated. While a job runs, every rise in the weekly window counts against abuser's daily budget, including anything you use yourself at the same time. This over-counts on purpose, so abuser can't under-measure its way past the limit, and it backs off while you're busy.
 
-The weekly window also sets a pace: by the end of the window's *n*-th budget day, it may be at most *n* × `daily_limit_pct` full, counting your own use. Today's budget is used up by abuser's own spend or by the window reaching that pace, whichever comes first. If you used 6% on the first day of the week, abuser has 8.3% of 14.3% left. Budget left over from quiet days carries forward to the pace, but abuser still never spends more than `daily_limit_pct` itself in a day.
+The weekly window also sets a pace: by the end of a budget day, it may be `daily_limit_pct` full for each 24 hours of the window up to then, counting your own use. The window rarely starts at `day_starts`, so the budget days it starts and ends in get a share of the limit for the hours they cover; whatever `day_starts` is, the days add up to the week. Today's budget is used up by abuser's own spend or by the window reaching that pace, whichever comes first. If you used 6% on the first day of the week, abuser has 8.3% of 14.3% left. Budget left over from quiet days carries forward to the pace, but abuser still never spends more than `daily_limit_pct` itself in a day.
 
 abuser checks the budget at least every `watch_secs` while a job runs. The job is stopped when one of these happens:
 - today's budget is used up, less `stop_margin_pct`;

@@ -7,11 +7,14 @@
 //! you are busy. Charges are dated, so a job that runs past the start of a
 //! new budget day charges the new day from then on.
 //!
-//! The weekly window also sets a pace: by the end of the window's n-th budget
-//! day, it may be at most n × `daily_limit_pct` full. Your own use counts
-//! here, so abuser only fills what you leave below the pace and can't push
-//! the week over it early. Today's budget is used up by whichever of the two
-//! comes first ([`used_today`]).
+//! The weekly window also sets a pace: by the end of a budget day, it may be
+//! `daily_limit_pct` full for each 24 hours of the window begun by then. The
+//! window rarely starts when a budget day does, so the budget day it starts in
+//! (and the one it ends in) gets a share of the limit for the hours it covers;
+//! whatever `schedule.day_starts` is, the days add up to the week. Your own
+//! use counts here, so abuser only fills what you leave below the pace and
+//! can't push the week over it early. Today's budget is used up by whichever
+//! of the two comes first ([`used_today`]).
 //!
 //! Everything here is pure, so the rules can be tested exhaustively.
 
@@ -89,12 +92,11 @@ fn no(why: impl Into<String>) -> Verdict {
 const WEEK: chrono::Duration = chrono::Duration::days(7);
 
 /// How full the weekly window may be at `day_end`: `daily_limit_pct` for
-/// each budget day of the window begun by then. `None` without a reset time.
+/// each 24 hours of the window up to then. `None` without a reset time.
 pub fn pace(cfg: &ProviderCfg, weekly: &Window, day_end: DateTime<Utc>) -> Option<f64> {
     let start = weekly.resets_at? - WEEK;
-    let secs = (day_end - start).num_seconds().max(0) as f64;
-    let days = (secs / 86_400.0).ceil().clamp(1.0, 7.0);
-    Some(days * cfg.daily_limit_pct)
+    let secs = (day_end - start).num_seconds().clamp(0, WEEK.num_seconds()) as f64;
+    Some(secs / 86_400.0 * cfg.daily_limit_pct)
 }
 
 /// How much of today's budget is used: abuser's own spend `spent`, or more
@@ -437,14 +439,14 @@ mod tests {
             used_pct: used,
             resets_at: Some(resets),
         };
-        // First day, ending 22 hours into the window: you used 6%.
-        let end = start + chrono::Duration::hours(22);
+        // First day, starting with the window: you used 6%.
+        let end = start + chrono::Duration::hours(24);
         assert_eq!(pace(&c, &weekly(6.0), end), Some(10.0));
         assert_eq!(used_today(&c, 0.0, Some(&weekly(6.0)), end), 6.0);
         // abuser's own spend counts when it's the larger.
         assert_eq!(used_today(&c, 3.0, Some(&weekly(1.0)), end), 3.0);
         // Third day: quiet earlier days leave room, but no more than the limit.
-        let end = start + chrono::Duration::hours(70);
+        let end = start + chrono::Duration::hours(72);
         assert_eq!(pace(&c, &weekly(5.0), end), Some(30.0));
         assert_eq!(used_today(&c, 2.0, Some(&weekly(5.0)), end), 2.0);
         // ...and a busy week leaves none.
@@ -460,26 +462,35 @@ mod tests {
     }
 
     #[test]
-    fn pace_counts_whole_budget_days() {
+    fn pace_follows_the_budget_day() {
         let c = ProviderCfg {
-            daily_limit_pct: 10.0,
+            daily_limit_pct: 12.0,
             ..ProviderCfg::default()
         };
         let resets = Utc.timestamp_opt(1_900_000_000, 0).unwrap();
         let start = resets - WEEK;
-        let weekly = Window {
-            used_pct: 0.0,
+        let weekly = |used| Window {
+            used_pct: used,
             resets_at: Some(resets),
         };
         let h = chrono::Duration::hours;
-        let s = chrono::Duration::seconds;
-        // A day ending exactly 24 hours in is still the first.
-        assert_eq!(pace(&c, &weekly, start + h(24)), Some(10.0));
-        assert_eq!(pace(&c, &weekly, start + h(24) + s(1)), Some(20.0));
-        // A day ending before the window began counts as its first.
-        assert_eq!(pace(&c, &weekly, start - h(30)), Some(10.0));
-        assert_eq!(pace(&c, &weekly, start), Some(10.0));
-        assert_eq!(pace(&c, &weekly, resets), Some(70.0));
+        let close = |a: f64, b: f64| assert!((a - b).abs() < 1e-9, "{a} != {b}");
+        // The window starts 6 hours before a budget day ends: that day gets
+        // a quarter of the limit, and each later day a whole one.
+        close(pace(&c, &weekly(0.0), start + h(6)).unwrap(), 3.0);
+        close(pace(&c, &weekly(0.0), start + h(30)).unwrap(), 15.0);
+        close(pace(&c, &weekly(0.0), start + h(54)).unwrap(), 27.0);
+        // The day the window ends in gets the rest, so the week adds up.
+        close(pace(&c, &weekly(0.0), start + h(174)).unwrap(), 84.0);
+        close(pace(&c, &weekly(0.0), resets + h(30)).unwrap(), 84.0);
+        // Nothing before the window starts.
+        close(pace(&c, &weekly(0.0), start - h(30)).unwrap(), 0.0);
+        // Today's room is what the pace allows by tonight beyond what's used:
+        // at 19% with today ending 54 hours in, 27 - 19 = 8% of today's 12%
+        // is left, so 4% counts as used...
+        close(used_today(&c, 0.0, Some(&weekly(19.0)), start + h(54)), 4.0);
+        // ...and with days starting with the window, ending 48 hours in, 7%.
+        close(used_today(&c, 0.0, Some(&weekly(19.0)), start + h(48)), 7.0);
         let unknown = Window {
             used_pct: 0.0,
             resets_at: None,
@@ -497,7 +508,7 @@ mod tests {
         let stale = Duration::from_secs(300);
         let resets = Utc.timestamp_opt(1_900_000_000, 0).unwrap();
         // First day of the window, which may be 14% full by its end.
-        let end = resets - WEEK + chrono::Duration::hours(20);
+        let end = resets - WEEK + chrono::Duration::hours(24);
         let weekly = |used| Window {
             used_pct: used,
             resets_at: Some(resets),

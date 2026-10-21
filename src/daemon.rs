@@ -1,5 +1,6 @@
 //! The background loop: read quota, pick work, run it, repeat.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -123,7 +124,7 @@ pub fn choose_provider(ctx: &Ctx, standings: &[Standing], work: &Work) -> Option
 pub async fn plan(ctx: &Ctx) -> Result<Plan> {
     let repos = crate::repos::scan(&ctx.cfg.repos)?;
     let presets = crate::presets::all(&ctx.cfg, &ctx.cfg_dir)?;
-    select::plan(
+    let mut plan = select::plan(
         &ctx.cfg,
         &ctx.store,
         &ctx.sources,
@@ -131,7 +132,32 @@ pub async fn plan(ctx: &Ctx) -> Result<Plan> {
         &presets,
         Utc::now(),
     )
-    .await
+    .await?;
+    let next = ctx.store.flag(NEXT_FLAG)?;
+    let label = &ctx.cfg.publish.label;
+    let mut open = BTreeMap::new();
+    for work in &plan.work {
+        if work.mode() != crate::presets::Mode::Pr || next.as_deref() == Some(&work.key()) {
+            continue;
+        }
+        let repo = work.repo.key();
+        if !open.contains_key(&repo) {
+            let n = crate::publish::open_prs(&work.repo, label).await;
+            open.insert(repo.clone(), n);
+        }
+        if let Some(why) = held(open[&repo], ctx.cfg.publish.max_open_prs, label) {
+            plan.held.insert(work.key(), why);
+        }
+    }
+    Ok(plan)
+}
+
+/// Why a repo with `open` open PRs takes no new one, if it doesn't.
+fn held(open: Option<usize>, max: usize, label: &str) -> Option<String> {
+    let open = open.filter(|&n| n >= max)?;
+    Some(format!(
+        "{open} open {label} PRs, publish.max_open_prs is {max}"
+    ))
 }
 
 /// What one tick decided.
@@ -140,6 +166,8 @@ pub enum Tick {
     Paused,
     NoBudget(Vec<String>),
     NothingToDo,
+    /// There is work, but its repos have `publish.max_open_prs` open.
+    Held(Vec<String>),
     Ran(crate::store::JobRow),
     Would(Work, ProviderId),
 }
@@ -173,17 +201,18 @@ pub async fn tick(ctx: &Ctx, dry_run: bool) -> Result<Tick> {
         tracing::warn!("{n} was asked to run next, but it isn't listed any more");
         ctx.store.set_flag(NEXT_FLAG, None)?;
     }
+    let mut full = Vec::new();
     for work in plan.work {
+        if plan.held.contains_key(&work.key()) {
+            let name = work.repo.name();
+            if !full.contains(&name) {
+                full.push(name);
+            }
+            continue;
+        }
         let Some(provider) = choose_provider(ctx, &standings, &work) else {
             continue;
         };
-        if work.mode() == crate::presets::Mode::Pr
-            && let Some(open) = crate::publish::open_prs(&work.repo, &ctx.cfg.publish.label).await
-            && open >= ctx.cfg.publish.max_open_prs
-        {
-            tracing::debug!(repo = %work.repo.key(), "{open} open abuser PRs; skipping");
-            continue;
-        }
         if dry_run {
             return Ok(Tick::Would(work, provider));
         }
@@ -192,7 +221,20 @@ pub async fn tick(ctx: &Ctx, dry_run: bool) -> Result<Tick> {
         }
         return Ok(Tick::Ran(runner::run(ctx, work, provider).await?));
     }
-    Ok(Tick::NothingToDo)
+    if full.is_empty() {
+        Ok(Tick::NothingToDo)
+    } else {
+        Ok(Tick::Held(full))
+    }
+}
+
+/// What a tick that held all work back says.
+pub fn held_message(repos: &[String], max: usize) -> String {
+    format!(
+        "waiting: {} {} at publish.max_open_prs ({max} open PRs); merge or close some",
+        repos.join(", "),
+        if repos.len() == 1 { "is" } else { "are" }
+    )
 }
 
 /// Runs until SIGTERM or Ctrl-C. A running job's agent is stopped then, so
@@ -257,6 +299,7 @@ pub async fn run(mut ctx: Ctx, config: Option<PathBuf>) -> Result<()> {
                 }
                 Ok(Tick::NoBudget(why)) => format!("not starting: {}", why.join("; ")),
                 Ok(Tick::NothingToDo) => "nothing to do".to_owned(),
+                Ok(Tick::Held(repos)) => held_message(&repos, ctx.cfg.publish.max_open_prs),
                 Ok(Tick::Paused) => "paused".to_owned(),
                 Ok(Tick::Would(..)) => String::new(),
                 Err(e) => {
@@ -337,6 +380,20 @@ pub async fn stop_running(store: &Store, which: impl Fn(&str) -> bool) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repos_at_the_pr_cap_are_held() {
+        assert_eq!(held(None, 2, "abuser"), None);
+        assert_eq!(held(Some(1), 2, "abuser"), None);
+        assert_eq!(
+            held(Some(3), 2, "abuser").as_deref(),
+            Some("3 open abuser PRs, publish.max_open_prs is 2")
+        );
+        assert_eq!(
+            held_message(&["nudge".into(), "acc".into()], 2),
+            "waiting: nudge, acc are at publish.max_open_prs (2 open PRs); merge or close some"
+        );
+    }
 
     #[test]
     fn heartbeat_says_whether_the_daemon_runs() {

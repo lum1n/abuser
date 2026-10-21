@@ -247,7 +247,12 @@ impl Pacer {
         } else {
             (self.backoff * 2).min(MAX_BACKOFF)
         };
-        let wait = retry_after.unwrap_or(self.backoff).min(MAX_BACKOFF);
+        // A Retry-After of 0 (or one shorter than the backoff) would have
+        // the next tick ask again at once and be refused again.
+        let wait = retry_after
+            .unwrap_or_default()
+            .max(self.backoff)
+            .min(MAX_BACKOFF);
         self.blocked_until = Some(std::time::Instant::now() + wait);
         wait
     }
@@ -335,6 +340,21 @@ mod tests {
         .merged_over(&old);
         assert_eq!(new.session.unwrap().used_pct, 9.0);
         assert_eq!(new.weekly.unwrap().used_pct, 40.0);
+    }
+
+    #[test]
+    fn a_retry_after_of_zero_still_backs_off() {
+        let mut p = Pacer::new(60);
+        assert_eq!(
+            p.rate_limited(Some(Duration::ZERO)),
+            Duration::from_secs(60)
+        );
+        assert!(matches!(p.cached(), Some(Err(QuotaError::RateLimited(_)))));
+        assert_eq!(p.rate_limited(None), Duration::from_secs(120));
+        assert_eq!(
+            p.rate_limited(Some(Duration::from_secs(600))),
+            Duration::from_secs(600)
+        );
     }
 
     #[test]

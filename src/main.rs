@@ -444,9 +444,11 @@ async fn tasks(ctx: &Ctx, json: bool) -> Result<()> {
             select::What::Preset(_) => "preset".to_owned(),
         };
         let forced = if next.as_deref() == Some(w.key().as_str()) {
-            "  (next)"
+            "  (next)".to_owned()
+        } else if let Some(why) = plan.held.get(&w.key()) {
+            format!("  (waiting: {why})")
         } else {
-            ""
+            String::new()
         };
         outln!(
             "{:>3}. {}  [{kind}]  {}{forced}",
@@ -492,6 +494,10 @@ async fn once(ctx: &Ctx, dry_run: bool) -> Result<()> {
             }
         }
         Tick::NothingToDo => outln!("nothing to do"),
+        Tick::Held(repos) => outln!(
+            "{}",
+            daemon::held_message(&repos, ctx.cfg.publish.max_open_prs)
+        ),
         Tick::Would(w, p) => outln!("would run on {p}: {}  ({})", w.title(), w.repo.key()),
         Tick::Ran(j) => print_job(&j),
     }

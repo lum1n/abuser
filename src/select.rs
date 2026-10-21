@@ -88,6 +88,9 @@ pub struct Skipped {
 #[derive(Debug, Default, Serialize)]
 pub struct Plan {
     pub work: Vec<Work>,
+    /// Why work listed in `work` can't start now, by its key: its repo has
+    /// `publish.max_open_prs` open. Filled in by `daemon::plan`.
+    pub held: BTreeMap<String, String>,
     pub skipped: Vec<Skipped>,
     pub errors: Vec<String>,
 }

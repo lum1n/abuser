@@ -286,6 +286,8 @@ fn draw_plan(f: &mut Frame, app: &App, area: Rect) {
             DIM
         } else if is_next {
             Style::new().cyan()
+        } else if p.why.is_some() {
+            Style::new().yellow()
         } else {
             Style::new()
         };
@@ -293,6 +295,8 @@ fn draw_plan(f: &mut Frame, app: &App, area: Rect) {
             Cell::from(num),
             Cell::from(if is_next {
                 "next".to_owned()
+            } else if p.work.is_some() && p.why.is_some() {
+                "waiting".to_owned()
             } else {
                 p.kind.clone()
             }),
@@ -407,7 +411,17 @@ fn plan_text(app: &App, p: &PlanItem) -> Text<'static> {
     }
     if let Some(why) = &p.why {
         lines.push(Line::from(vec![
-            Span::styled(format!("{:<9}", "skipped"), DIM),
+            Span::styled(
+                format!(
+                    "{:<9}",
+                    if p.work.is_some() {
+                        "waiting"
+                    } else {
+                        "skipped"
+                    }
+                ),
+                DIM,
+            ),
             Span::styled(why.clone(), Style::new().yellow()),
         ]));
     }

@@ -35,11 +35,12 @@ impl PlanItem {
     }
 }
 
-pub fn plan_items(plan: Plan) -> Vec<PlanItem> {
+pub fn plan_items(mut plan: Plan) -> Vec<PlanItem> {
     let mut items: Vec<PlanItem> = plan
         .work
         .into_iter()
         .map(|w| {
+            let why = plan.held.remove(&w.key());
             let (kind, body) = match &w.what {
                 What::Task(t) => (format!("task ({})", t.source), t.body.clone()),
                 What::Preset(p) => ("preset".to_owned(), p.prompt.clone()),
@@ -51,7 +52,7 @@ pub fn plan_items(plan: Plan) -> Vec<PlanItem> {
                 body,
                 key: Some(w.key()),
                 work: Some(w),
-                why: None,
+                why,
             }
         })
         .collect();

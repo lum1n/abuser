@@ -288,13 +288,16 @@ pub async fn run(mut ctx: Ctx, config: Option<PathBuf>) -> Result<()> {
     stopped
 }
 
-/// Sleeps for `max`, or until something is asked to run next.
+/// Sleeps for `max`, or until something new is asked to run next. Work that
+/// was asked for already and waits for budget doesn't cut the nap short.
 async fn nap(store: &Store, max: Duration) {
     let step = Duration::from_secs(5);
     let until = tokio::time::Instant::now() + max;
+    let asked = store.flag(NEXT_FLAG).ok().flatten();
     while tokio::time::Instant::now() < until {
         tokio::time::sleep(step.min(until - tokio::time::Instant::now())).await;
-        if store.flag(NEXT_FLAG).ok().flatten().is_some() {
+        let next = store.flag(NEXT_FLAG).ok().flatten();
+        if next.is_some() && next != asked {
             return;
         }
     }
@@ -346,5 +349,26 @@ mod tests {
         assert!(!hb.alive(Utc::now() + chrono::Duration::minutes(2)));
         beat(&store, STOPPED);
         assert!(!heartbeat(&store).unwrap().alive(Utc::now()));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn nap_wakes_only_for_new_work_asked_for() {
+        let store = Store::in_memory().unwrap();
+        let max = Duration::from_secs(300);
+        // Asked for before the nap and waiting for budget: sleep it out.
+        store.set_flag(NEXT_FLAG, Some("a")).unwrap();
+        let start = tokio::time::Instant::now();
+        nap(&store, max).await;
+        assert_eq!(start.elapsed(), max);
+
+        // Something else asked for while napping: wake within a step.
+        let asker = store.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(12)).await;
+            asker.set_flag(NEXT_FLAG, Some("b")).unwrap();
+        });
+        let start = tokio::time::Instant::now();
+        nap(&store, max).await;
+        assert_eq!(start.elapsed(), Duration::from_secs(15));
     }
 }

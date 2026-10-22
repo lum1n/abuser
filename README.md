@@ -33,6 +33,8 @@ codex (plus)
    3. It pushes a `abuser/…` branch and opens a **draft PR** (GitHub, via `gh`).
    4. It tells the task source: a Lapp todo is ticked, a GitHub issue gets `Closes #N`, and so on.
 
+   A repo with `publish.max_open_prs` (default 2) open `abuser` PRs gets no new PR work until you merge or close some. `abuser tasks` marks that work as waiting.
+
 ### The daily limit
 
 Spend is measured, not estimated. While a job runs, every rise in the weekly window counts against abuser's daily budget, including anything you use yourself at the same time. This over-counts on purpose, so abuser can't under-measure its way past the limit, and it backs off while you're busy.
@@ -78,12 +80,12 @@ abuser install-service         # systemd user unit, or launchd agent on macOS; (
 | `abuser queue` / `abuser queue rm <id>` | List the queue, or remove a task from it. |
 | `abuser skip <task>` | Leave a task out until `abuser retry`, or put a preset off for a cooldown. |
 | `abuser retry <task>` | Try a task again that was skipped, gave up or is waiting to retry. |
-| `abuser run-now <task>` / `abuser run-now <preset> --repo <repo>` | Run it next, whatever its attempts or cooldown say. The budget still decides when. |
+| `abuser run-now <task>` / `abuser run-now <preset> --repo <repo>` | Run it next, whatever its attempts, cooldown or `publish.max_open_prs` say. The budget still decides when. |
 | `abuser jobs` | Recent jobs with what they spent and their PRs. |
 | `abuser job [<job>] [--diff]` | One job: its summary, spend and files, or its changes. |
 | `abuser logs [<job>] [-f]` | What the agent did, step by step; `-f` follows a running job. |
 | `abuser pause` / `abuser resume` | Stop or restart starting jobs. |
-| `abuser stop <job>` | Stop a running job. |
+| `abuser stop <job>` | Stop a running job; its worktree is discarded. |
 | `abuser config set <key> <value>` / `unset <key>` / `edit` | Change the config, keeping its comments. The daemon reloads it. |
 | `abuser config check \| example \| path` | Check the setup, print the example config, or show the file locations. |
 
